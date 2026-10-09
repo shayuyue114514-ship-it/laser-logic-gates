@@ -2,6 +2,9 @@
 
 在网格上放置光学元件，激光沿网格传播并与元件发生作用，由此完成逻辑运算。
 
+- 在线试玩：https://laser.shayuyue.com
+- 源码仓库：https://github.com/shayuyue114514-ship-it/laser-logic-gates
+
 ## 本地运行
 
 直接双击 `index.html` 即可，不需要安装任何环境，也不需要本地服务器。
@@ -74,7 +77,7 @@ dist/               发布成品目录，部署时上传的就是它，里面只
 
 线上地址是 https://laser.shayuyue.com ，站点跑在 Cloudflare 上，纯静态，没有构建步骤。
 
-部署用 Cloudflare 官方的 wrangler 命令行工具完成，本机已装 Node。以下命令都在项目根目录下执行。
+部署用 Cloudflare 官方的 wrangler 命令行工具完成，本机已装 Node。以下命令都在项目根目录下执行，命令里的路径按本机位置写死，换一台机器跑时替换成你自己的项目目录。
 
 第一次部署前先登录一次：
 
