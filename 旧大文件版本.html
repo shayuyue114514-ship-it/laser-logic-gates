@@ -1,0 +1,4459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>绘制网格</title>
+<style>
+  /* 页面白底、无滚动条：网格只出现在视口矩形内，视口外保持白底 */
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #ffffff;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  /* touch-action 关掉浏览器自带手势，避免与滚轮缩放、中键拖拽冲突 */
+  #gridCanvas {
+    display: block;
+    touch-action: none;
+    user-select: none;
+    /* 画布本身不可聚焦，加 tabindex 后可以主动抢键盘焦点；全屏画布不需要焦点框 */
+    outline: none;
+  }
+  /* 元件层：盖在画布上方的 SVG，本步不做交互，指针事件全部透传给画布 */
+  #elemLayer {
+    position: fixed;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+  }
+  /* 简介浮层：独立于 Canvas 的 DOM 层，靠 z-index 压在元件层之上，不会被网格上的元件盖住
+     这里只管定位与层级，字号、内边距、圆角、颜色都由 JS 从 CONFIG / COLOR 一次性注入 */
+  #slotTip {
+    position: fixed;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    border: 2px solid;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+  #slotTipName {
+    font-weight: 600;
+  }
+  /* 弹出面板的通用外观：设置弹窗与文件弹窗共用这一类，两者的底板、行布局、控件样式完全一致
+     这里只管定位与层级，字号、内边距、圆角、颜色由 JS 从 CONFIG / COLOR 一次性注入
+     显示时要接住鼠标，所以指针事件是开的；隐藏时 display 为 none，自然收不到任何事件 */
+  .popup {
+    position: fixed;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    display: none;
+    border: 2px solid;
+    opacity: 0;
+    pointer-events: auto;
+    z-index: 4;
+  }
+  /* 弹窗里的每一行：文字靠左、控件靠右，行高由 JS 从配置注入，以后放滑块也按同一行高对齐 */
+  .popup .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  /* 开关：圆角滑轨加圆形滑块，开与关只差一个类，滑块位移和滑轨变色都交给 CSS 过渡 */
+  /* 尺寸写死在这里而不是走配置：它只有这一处用，且必须和行高对得上，放配置区反而多一层跳转 */
+  .popup .sw {
+    position: relative;
+    flex: none;                 /* 不被左边的文字挤扁 */
+    width: 34px;
+    height: 18px;
+    border-radius: 9px;
+    background: #B9CBD8;        /* 关闭态滑轨：灰蓝，明确区别于开启态 */
+    transition: background-color 0.16s ease-out;  /* 与槽反馈同为 0.16 秒的缓出，手感统一 */
+  }
+  .popup .sw .knob {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ffffff;
+    transition: transform 0.16s ease-out;
+  }
+  .popup .sw.on {
+    background: #29B6F6;        /* 开启态滑轨：与视口边框同色，整页仍是同一色系 */
+  }
+  .popup .sw.on .knob {
+    transform: translateX(16px);  /* 滑轨宽 34 减滑块 14 再减左右各 2 的留边 */
+  }
+  /* 行首文字：禁止换行并禁止收缩，否则一行挤不下时会被压成一字一行 */
+  .popup .lbl {
+    flex: none;
+    white-space: nowrap;
+  }
+  /* 速度滑块：轨道与滑块交给浏览器原生渲染，只用 accent-color 把它染成同一个蓝 */
+  /* 宽度写死并禁止收缩，否则会被左边的文字挤变形，与开关同样对待 */
+  .popup input[type="range"] {
+    flex: none;
+    width: 110px;
+    accent-color: #29B6F6;
+  }
+  /* 速度数值：做成小徽章，白底圆角、数字等宽居中，读数清楚又不像裸露的文本 */
+  .popup .val {
+    flex: none;
+    box-sizing: border-box;
+    width: 58px;
+    margin-left: 8px;
+    padding: 3px 0;
+    text-align: center;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.72);
+    color: #1B6C8F;                /* 深一档的蓝：白底上比正文灰更清楚 */
+    font-variant-numeric: tabular-nums;  /* 等宽数字：拖动时数字跳动不会左右晃 */
+  }
+  /* 文件名：占满行内剩余宽度，超长时从左侧省略，绝不把整行撑破 */
+  .popup .fname {
+    flex: 1;
+    min-width: 0;               /* 缺了它，弹性子项不会收缩，省略号永远不会出现 */
+    margin-left: 8px;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #1B6C8F;
+  }
+  /* 文件弹窗里的动作项：一行一个，整行都是可点区域 */
+  /* 平时不着色也不描边，只在悬停时浮出一层淡蓝——弹窗本身很窄，再并排放三块白底会显得很吵 */
+  .popup .btn {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #1B6C8F;             /* 深一档的蓝：与文件名同色，读起来是「可以点的」，又不必加底板 */
+    font-family: inherit;
+    font-size: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.16s ease-out;
+  }
+  .popup .btn:hover { background: rgba(255, 255, 255, 0.66); }
+  .popup .btn:active { background: rgba(255, 255, 255, 0.92); }
+  /* 教程弹窗：点教程按钮后从屏幕正中弹出，比设置、文件两个弹窗大得多 */
+  /* 居中用左右各 50% 再位移自身一半来实现，与窗口实际尺寸无关，所以尺寸改大改小都不用动这里 */
+  .popup.modal {
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    flex-direction: column;   /* 取消按钮在上、内容区在下，纵向排 */
+    z-index: 6;               /* 压在所有浮层之上：它是模态窗口，弹出来就在最前面 */
+  }
+  /* 关闭按钮：一个正方形的图标按钮，叉是 SVG 里两笔圆头描边，收笔的圆与画布上那几个图标一致 */
+  /* 这里特意不给常态底色：本项目里白色是「选中」的信号，一个常驻白底的按钮会被读成当前选中项 */
+  /* 只靠深一档的蓝表示「可点」，与文件弹窗里那几个动作项同一套读法 */
+  .popup.modal .btn.icon {
+    align-self: flex-start;   /* 靠左上收住：不写这句会被横向拉伸，按钮就占满一整行 */
+    flex: none;
+    justify-content: center;  /* .popup .btn 默认把内容靠左排，图标要居中才不偏在左边 */
+    width: 26px;              /* 与设置弹窗的行高同档，刚好放得下 18 的图标再留一圈空白 */
+    height: 26px;
+    padding: 0;               /* 尺寸已经定死，内边距再撑就会把图标挤歪 */
+  }
+  .popup.modal .btn.icon svg {
+    pointer-events: none;     /* 让指针事件一律落在按钮本身上：按下时判定的是按钮，不是里面的路径 */
+  }
+  /* 内容区：占满取消按钮之外的全部高度；文字多了自己滚动，绝不把窗口撑高 */
+  /* 底色与文字色由 JS 从 COLOR 注入，取的是「未选中」那一档的蓝，压暗窗口底板一级，读起来是凹进去的一块 */
+  .popup.modal .doc {
+    box-sizing: border-box;
+    flex: 1;                  /* 吃掉剩余高度，窗口加高时它跟着长 */
+    min-height: 0;            /* 缺了它，弹性子项不会低于内容自身高度，滚动条就永远不出现 */
+    overflow-y: auto;
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    line-height: 1.6;
+    user-select: text;        /* 教程是给人读的，允许选中复制 */
+    white-space: normal;      /* 正文改用块级元素分层排布，版面由结构决定，不再取决于源码里的换行与缩进 */
+  }
+  /* 调试面板：默认隐藏，用 debugPanel.show() 唤出；浮在网格之上，方便随时调参 */
+  /* 钉在左下角而不是左上角：左上角是元件选择面板的位置，钉在那里会把选项槽全挡住 */
+  #debugPanel {
+    display: none;
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid #90CAF9;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #111111;
+    z-index: 10;
+    user-select: none;
+  }
+  #debugPanel .grp {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #debugPanel .grp + .grp {
+    margin-top: 6px;
+  }
+  #debugPanel .sw {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #1565C0;
+    border-radius: 3px;
+  }
+  #debugPanel label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: #444444;
+  }
+  #debugPanel input[type="range"] {
+    width: 84px;
+  }
+  #debugPanel .code {
+    font-family: Menlo, Consolas, monospace;
+    color: #444444;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gridCanvas" tabindex="0"></canvas>
+<svg id="elemLayer"></svg>
+
+<!-- 简介浮层：排在元件层之后，配合 z-index 保证它永远画在元件之上 -->
+<div id="slotTip">
+  <div id="slotTipName"></div>
+  <div id="slotTipDesc"></div>
+</div>
+
+<!-- 设置弹窗：排在简介浮层之后，齿轮点亮时显示在齿轮正下方；开关初始带 on 类，与默认开启的状态一致 -->
+<div id="settingsPanel" class="popup">
+  <div class="row">
+    <span class="lbl">渲染网格</span>
+    <span class="sw on" id="gridSwitch"><span class="knob"></span></span>
+  </div>
+  <div class="row">
+    <span class="lbl">高级渲染</span>
+    <span class="sw on" id="advSwitch"><span class="knob"></span></span>
+  </div>
+  <div class="row">
+    <span class="lbl">运行速度</span>
+    <input type="range" id="speedSlider">
+    <span class="val" id="speedValue"></span>
+  </div>
+</div>
+
+<!-- 文件弹窗：文件按钮点亮时显示在该按钮正下方，与设置弹窗同款底板 -->
+<!-- 文件名一行，三个动作各占一行；动作本步只打印，确认接上之后下一步再换成真实读写 -->
+<div id="filePanel" class="popup">
+  <div class="row">
+    <span class="lbl">当前文件</span>
+    <span class="fname" id="fileName"></span>
+  </div>
+  <button class="btn" id="btnOpen">打开</button>
+  <button class="btn" id="btnSave">保存</button>
+  <button class="btn" id="btnSaveAs">另存为</button>
+  <button class="btn" id="btnImportSel">以选区导入</button>
+  <button class="btn" id="btnExportSel">以选区导出</button>
+</div>
+
+<!-- 教程弹窗：点教程按钮后从屏幕正中弹出，底板与设置、文件两个弹窗同一套配色 -->
+<!-- 左上角是一个叉形的关闭按钮，点了就把窗口关掉；下面的内容区先留空，等教程文字写好之后再填进去 -->
+<div id="tutorialPanel" class="popup modal">
+  <button class="btn icon" id="btnTutorialCancel" aria-label="取消">
+    <!-- 叉用两笔圆头描边画成，收笔是圆的，与画布上齿轮、文件、教程三个图标的收笔同一套 -->
+    <!-- 描边取 currentColor：颜色跟着按钮文字色走，以后改按钮色不必再改这里 -->
+    <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" focusable="false">
+      <path d="M5.5 5.5 L12.5 12.5 M12.5 5.5 L5.5 12.5"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+    </svg>
+  </button>
+  <div class="doc" id="tutorialDoc"></div>
+</div>
+
+<div id="debugPanel">
+  <div class="grp">
+    <span class="sw" id="swFill"></span>
+    <label>填充</label>
+    <label>H<input type="range" id="fillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="fillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="fillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swStroke"></span>
+    <label>描边</label>
+    <label>H<input type="range" id="strokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="strokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="strokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeStroke"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swPanel"></span>
+    <label>底板</label>
+    <label>H<input type="range" id="panelH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="panelS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="panelL" min="0" max="100" step="1"></label>
+    <span class="code" id="codePanel"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSlot"></span>
+    <label>槽填充</label>
+    <label>H<input type="range" id="slotH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="slotS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="slotL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSlot"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swGearFill"></span>
+    <label>齿轮填充</label>
+    <label>H<input type="range" id="gearFillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="gearFillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="gearFillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeGearFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swGearStroke"></span>
+    <label>齿轮描边</label>
+    <label>H<input type="range" id="gearStrokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="gearStrokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="gearStrokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeGearStroke"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSetFill"></span>
+    <label>设置槽填充</label>
+    <label>H<input type="range" id="setFillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="setFillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="setFillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSetFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSetStroke"></span>
+    <label>设置槽描边</label>
+    <label>H<input type="range" id="setStrokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="setStrokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="setStrokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSetStroke"></span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ========== 常量配置 ========== */
+
+const CONFIG = {
+  gridUnit: 1,            // 网格基本单位：1 个世界单位 = 1 格，也是永远显示的最小格子
+  viewportMargin: 24,     // 视口相对画布的内缩边距（CSS px），让视口边界可见
+  panelHeight: 70,        // 画布上方预留的空白高度（CSS px）：给元件选择面板用，网格视图整体下移这么多
+  panelGap: 12,           // 上方面板矩形与窗口顶边、网格顶边之间的空隙（CSS px）
+  bottomBarHeight: 35,    // 底部栏的高度（CSS px）：取上方元件面板高度的一半，整页上下形成呼应
+  hintFontSize: 15,       // 底栏提示文字的字号（CSS px）
+  panelSlotCount: 8,      // 面板里选项槽的数量
+  panelSlotPad: 8,        // 选项槽区域相对面板内沿的内缩（CSS px），让槽不贴到面板边框上
+  panelSlotGap: 8,        // 选项槽之间的横向间隔（CSS px）
+  panelSlotRadius: 8,     // 选项槽的圆角半径（CSS px）
+  panelSlotSide: 50,      // 选项槽边长（CSS px）：固定值，不再由面板高度推出，面板加高不会把槽一起撑大
+  panelSlotElementLen: 28,      // 槽内元件的长度（CSS px，三角形顶点到底边）：形状比例不变，宽度按 elementWid/elementLen 自动推出
+  panelSlotHoverScale: 0.93,    // 悬停时整个槽缩到的比例：槽与槽内元件一起缩，不会只缩框不缩元件
+  panelSlotPressedScale: 0.86,  // 按下时整个槽缩到的比例：比悬停更深，手感像真的按进去
+  panelSlotAnimDuration: 0.16,  // 槽反馈动画时长（秒）：悬停与按下的缩放都用它，走固定时长的缓出曲线，不用指数平滑
+  slotSelectedBorderWidth: 3,   // 选中槽的描边宽度（CSS px）：比普通槽的 2px 略粗，作为选中标识
+  settingsLitAmount: 0.45,      // 设置按钮打开时的提亮幅度（0~1）：朝白色混这么多，太大就发灰不像同一色系
+  settingsLitDuration: 0.22,    // 设置按钮提亮的过渡时长（秒）：亮起与熄灭都走它，太快会像闪一下
+  gearTeeth: 8,           // 齿轮齿数：8 齿在二十几像素的尺寸下疏密刚好，再多就糊成一圈看不出齿
+  gearTipR: 0.33,         // 齿顶半径（世界单位）：和元件同一套尺度，随槽内缩放自动变小
+  gearRootR: 0.245,       // 齿根半径（世界单位）：齿顶到齿根的高度即齿高，太浅就不像齿轮
+  gearHoleR: 0.125,       // 中心孔半径（世界单位）：孔和齿根之间要留出一圈可见的环，否则齿轮糊成一坨
+  gearTipHalfDeg: 7,      // 齿顶半角（度）：齿顶比齿根窄，齿才是有锥度的梯形而不是方块
+  gearRootHalfDeg: 12,    // 齿根半角（度）：两齿之间的空隙由它和齿距共同决定
+  gearStroke: 0.07,       // 齿轮描边宽度（世界单位）：比元件描边细，否则中心孔会被描边糊死
+  fileHalfW: 0.26,        // 文件图标半宽（世界单位）：纸比齿轮窄一点，视觉重量才和齿轮相当
+  fileHalfH: 0.325,       // 文件图标半高（世界单位）：约 26px，加上描边后与齿轮外径 29px 基本齐平
+  fileCornerR: 0.06,      // 文件图标外框圆角半径（世界单位）：与齿轮的圆角风格一致，不出现硬直角
+  fileFoldLen: 0.15,      // 文件图标右上折角的边长（世界单位）：随纸面一起缩小，比例保持不变
+  fileStroke: 0.04,       // 文件图标描边宽度（世界单位）：比齿轮明显细一档，约 1.6px，纸面才显得轻盈不糊
+  selectIconH: 0.66,      // 「选中」图标的高度（世界单位）：与文件图标 0.65 基本齐平，一排图标视觉重量一致
+  selectIconStroke: 0.075, // 「选中」图标描边宽度（世界单位）：比文件图标明显粗一档，约 3px，箭头轮廓更实
+  selectIconDX: 0.04,     // 「选中」图标的水平偏移（世界单位）：箭头略微右移，让视觉重心更靠近槽心
+  tutorialIconOuterR: 0.33, // 教程图标外缘半径（世界单位）：与齿轮齿顶 0.33 同档，一排按钮的图标视觉重量一致
+  tutorialRingStroke: 0.04, // 教程图标圆环的描边宽度（世界单位）：圆面填实后边框只当一圈轮廓，取与文件图标同一档
+  marqueeThreshold: 4,    // 拉框判定阈值（CSS px）：指针移动超过它才算拉框，否则仍当单击，避免手一抖拉出一个空框
+  marqueeWidth: 1,        // 拉框边框宽度（CSS px）：细一点，别挡住框住的内容
+  panelTipGap: 6,         // 面板矩形下边缘与简介浮层之间的竖向间隔（CSS px）
+  panelTipPadX: 12,       // 简介底板内的左右内边距（CSS px）
+  panelTipPadY: 4,        // 简介底板内的上下内边距（CSS px）
+  panelTipRadius: 6,      // 简介底板圆角半径（CSS px）
+  panelTipNameSize: 13,   // 简介里元件名称的字号（CSS px）
+  panelTipDescSize: 12,   // 简介里说明文字的字号（CSS px）
+  panelTipLineHeight: 17, // 简介说明文字的行高（CSS px）
+  panelTipDelay: 0.9,     // 指针停在同一个槽上多久才显示简介（秒）：防止扫过一排槽时闪出一堆浮层
+  panelTipAnimDuration: 0.18, // 简介浮层的显隐动画时长（秒）：走缓入缓出曲线
+  panelTipRise: 6,        // 简介浮层滑入的起始偏移（CSS px）：从上方这么远的位置滑到位
+  settingsPanelWidth: 264,      // 设置弹窗宽度（CSS px）：右边缘与齿轮槽右内沿对齐，宽度要装下「文字＋滑块＋数值」一行
+  settingsPanelGap: 6,          // 设置弹窗顶边与上方面板矩形下边缘的间隔（CSS px）
+  settingsPanelPadX: 12,        // 设置弹窗内的左右内边距（CSS px）
+  settingsPanelPadY: 8,         // 设置弹窗内的上下内边距（CSS px）
+  settingsPanelRadius: 8,       // 设置弹窗圆角半径（CSS px）：与选项槽、简介浮层同一档
+  settingsPanelRowH: 28,        // 设置弹窗里每行的行高（CSS px）：以后放开关或滑块都按这个高度排
+  settingsPanelFontSize: 12,    // 设置弹窗文字字号（CSS px）：与简介浮层的说明文字同号
+  tutorialPanelW: 520,          // 教程弹窗宽度（CSS px）：要装下成段的教程文字，比设置弹窗宽得多
+  tutorialPanelH: 360,          // 教程弹窗高度（CSS px）：高度定死，文字超出时由里面的内容区自己滚动，窗口不被撑高
+  minScale: 4,            // 最小缩放：1 世界单位 = 4 CSS px
+  maxScale: 400,          // 最大缩放：1 世界单位 = 400 CSS px
+  wheelZoomRate: 0.0015,  // 滚轮 deltaY → 缩放指数的系数
+  smoothLambda: 14,       // 平滑收敛速度，越大越跟手
+  settlePx: 0.01,         // 平滑吸附阈值（CSS px）：误差小于它就判定为已停下
+  settleLogEps: 1e-4,     // 缩放对数的吸附阈值
+  defaultScale: 40,       // 初始缩放
+  defaultAnchorWX: 0,     // 初始参考点的世界坐标 X（网格原点）
+  defaultAnchorWY: 0,     // 初始参考点的世界坐标 Y（网格原点）
+  elementLen: 0.7,        // 元件长度（世界单位，1 = 1 格）：等腰三角形顶点到底边
+  elementWid: 0.45,       // 元件底边宽度（世界单位）
+  elementNotch: 0.2,      // 透射器底边的内凹深度（世界单位）：凹点取底边中点，朝顶点方向凹进去
+  inverterLen: 0.6,       // 反相器三角形顶点到底边的长度：比 elementLen 短，给顶点上的气泡腾出位置
+  elementBubbleR: 0.13,   // 反相器气泡的半径（世界单位）：非门符号的标志，圆心正好落在三角形顶点上
+  elementHeadRatio: 0.4,  // 光源尖头段占元件长度的比例：按参考图，右侧三角段约占整体四成
+  lampHalf: 0.3,          // 灯的半边长（世界单位）：边长 0.6，比其它元件的 0.7 略小一圈
+  lampRadius: 0.12,       // 灯的圆角半径（世界单位）：约占半边长的四成，圆角明显但不至于圆成一团
+  lampAnimDuration: 0.02, // 灯亮起的缓动时长（秒）：只剩两帧左右的过渡，观感上等同瞬间亮起
+  lampGlowBlur: 0.3,      // 灯光晕的模糊半径（世界单位）：用高斯模糊把灯的轮廓向外化开，边缘没有硬圈
+  lampGlowAlpha: 0.8,     // 灯光晕的颜色浓度：模糊后贴着灯的那一圈约为它的一半，整体是淡红
+  elementStroke: 0.1,     // 元件描边宽度（世界单位）；描边只露外侧一半，可见环宽即 0.05
+  elementStrokeSelected: 0.13, // 选中元件的描边宽度（世界单位）：只比常态粗三成，轮廓更实即可，再粗就成粗黑框
+  ghostLambda: 30,        // 虚影跟随鼠标的收敛速度，比相机快得多，换格时干脆利落不拖沓
+  ghostSettle: 0.001,     // 虚影吸附阈值（世界单位）：误差小于它就直接落到格心
+  ghostOpacity: 0.45,     // 虚影整体透明度：必须用整节点透明度，不能用 fill-opacity/stroke-opacity
+  ghostRejectDuration: 1,     // 虚影「进不去」动画总时长（秒）：指数缓出，在 0.1 处位移过半、透明度归零，所以可见部分约 0.1 秒
+  ghostFadeInLambda: 25,      // 虚影淡入速度（1/秒）：回到可放置格时按指数收敛出现，约 0.25 秒收敛到吸附阈值
+  rotateLambda: 25,           // 朝向旋转的收敛速度（1/秒）：先快后慢，约 0.3 秒转到目标朝向；虚影和元件共用
+  rotateSettle: 0.1,          // 旋转吸附阈值（度）：误差小于它就直接落到目标角度，避免留残差
+  elementDeleteDuration: 0.1,  // 元件删除动画时长（秒）：一边收缩一边淡出，和选中缓动同一档节奏
+  selectAnimDuration: 0.1,     // 选中缓动时长（秒）：填充与描边在这段时间里从常态过渡到选中配色
+  orbitDuration: 0.16,          // 公转动画时长（秒）：WASD 整批旋转一步 90° 的走完时间，短一点才跟手
+  moveLambda: 20,               // 拖动缓动速度（1/秒）：元件视觉位置按指数缓出追上目标格，先快后慢、跟手但不硬跳
+  moveSettle: 0.002,            // 拖动缓动吸附阈值（世界单位）：残差小于它就直接归零，避免留一点点永远抖的尾巴
+  microframeDt: 0.12,          // 一个微帧对应的真实时长（秒）：约 8 微帧/秒，也是速度滑块初值的来源
+  speedSliderSteps: 1000,      // 速度滑块的总刻度数：刻度越细，拖动手感越连续
+  speedDtMin: 0.02,            // 滑块最左端之外的最小微帧时长（秒）：选 0.02 是为了让滑块中点落在约 0.14 秒，贴近常用的 0.12 秒
+  speedDtMax: 1,               // 滑块最右端的微帧时长（秒）：一个微帧要等满 1 秒
+  maxQuiescentSteps: 10000,    // 零延迟时单帧最多结算的微帧数：只防逻辑成环时死循环，正常链路远用不到
+  laserWidth: 0.133,           // 激光光芯宽度（世界单位）：随缩放一起变粗变细，1 格 = 1
+  laserGlowLayers: 8,          // 辉光层数：用多层同心描边叠出连续衰减，层数越多过渡越平滑
+  laserGlowSpread: 3.4,        // 最外层辉光的宽度相对光芯的倍数：越大晕开得越远
+  laserGlowAlpha: 0.11,        // 单层辉光的峰值透明度：多层会叠加，实际观感约为它的两倍
+  maxStepsPerFrame: 8          // 单帧最多推进的微帧数：防止切回标签页后一次性补算太多，陷入「越补越慢」的螺旋
+};
+
+/* 配色：网格蓝色系，背景淡蓝 */
+const COLOR = {
+  line: "#42A5F5",        // 网格线：全部同色同粗细，没有加粗线
+  background: "#81D4FA",  // 视口内背景：淡蓝
+  border: "#29B6F6",      // 视口边框：Light Blue 400
+  panelFill: "#7AD5FF",   // 上方面板底板：硬编码定死，等价于 hsl(199, 100%, 74%)，不随调试面板变化
+  slotFill: "#94DBFF",    // 选项槽填充：硬编码定死，等价于 hsl(200, 100%, 79%)，不随调试面板变化
+  slotFillSelected: "#C4EBFF", // 选中槽填充：比 slotFill 朝白色提亮约 45%，和未选中槽一眼能分开
+  slotBorder: "#29B6F6",  // 选项槽描边：与视口边框同色，整页外框保持一个色系
+  slotBorderSelected: "#5FC8F8", // 选中槽描边：比 slotBorder 朝白色提亮约 25%，只亮一点点，和加粗一起构成选中标识
+  tipFill: "#C4EBFF",     // 简介底板填充：淡蓝，比面板底色浅一档，浮在网格上也读得清
+  tipBorder: "#29B6F6",   // 简介底板描边：与面板、视口边框同色，整页仍是同一套外框
+  tipName: "#0D47A1",     // 简介里元件名称的文字色：深蓝，层级最高
+  tipDesc: "#2C4A63",     // 简介里说明文字的颜色：略浅的深灰蓝，不抢名称
+  laserCore: "#F5FBFF",   // 激光光芯：淡白略偏冷，比浅蓝底亮，压在上面读得出来
+  laserGlow: "#FFFFFF",   // 激光辉光：纯白，透明度由每层的 globalAlpha 单独给，所以这里只要颜色
+  lampGlow: "#FF8A80",    // 灯被照亮时的光晕：淡红，透明度由亮起进度与峰值一起给
+  selectBorder: "#1565C0", // 拉框描边：深蓝，压在淡蓝网格上边界清晰
+  selectFill: "rgba(21, 101, 192, 0.14)", // 拉框的填充：同色低透明度，压得住网格又不遮住框里的元件
+  hintText: "#0D47A1"     // 底栏提示文字：深蓝，压在淡蓝底板上读得清，且与整页仍是同一色系
+};
+
+// 画布上文字的字体族：与页面正文同族，底栏提示和以后画布上的其它文字都用它，避免各处各写一串
+const UI_FONT = "-apple-system, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"; // string：画布文字字体族
+
+// 元件配色：用 HSL 三元组而不是 hex，因为临时调色器直接改这三个数就能实时生效
+const elementHSL = {
+  fill: { h: 207, s: 89, l: 55 },   // 填充：Blue 500
+  stroke: { h: 210, s: 80, l: 42 }  // 描边：Blue 800，同色系略深一档
+};
+
+// 选中配色：同样用 HSL 三元组，和本体配色一套表示，选中缓动时逐通道插值就行，不必再拆 hex
+// 数值分别等价于原来的 #4FC3F7 与 #0277BD，色相只小幅平移，不跨 0 度，线性插值不会串色
+const selectLitHSL = {
+  fill: { h: 199, s: 91, l: 64 },   // 选中填充：比本体亮一档，一眼看出被选中又不刺眼
+  stroke: { h: 202, s: 98, l: 37 }  // 选中描边：比浅色填充明显更深一档，但仍是饱和的蓝，不压到近黑
+};
+
+// 灯被激光照亮时的配色：淡红，与本体同一套 HSL 表示，亮起缓动时逐通道插值过渡
+// 这里只作为「亮起后的目标色」的登记处，实际混合在 RGB 里做，所以不用操心色相绕远路的问题
+const lampLitHSL = {
+  fill: { h: 0, s: 85, l: 80 },    // 亮起填充：很浅的红，压得住深色描边又不刺眼
+  stroke: { h: 0, s: 62, l: 50 }   // 亮起描边：比填充深一档，轮廓依旧清晰
+};
+
+// 常态色、亮起色、选中色三组端点预先换算成 RGB：混合时只做乘加，省掉每帧重复的 HSL 换算
+// 灯的颜色过渡全部在这几组数上做逐通道混合，效果等价于盖一层遮罩淡入，且不经过色相环
+const RGB = {
+  elementFill: hslToRgb(elementHSL.fill),
+  elementStroke: hslToRgb(elementHSL.stroke),
+  lampFill: hslToRgb(lampLitHSL.fill),
+  lampStroke: hslToRgb(lampLitHSL.stroke),
+  selectFill: hslToRgb(selectLitHSL.fill),
+  selectStroke: hslToRgb(selectLitHSL.stroke)
+};
+
+// 调试面板里元件那两组滑块的取色沙盒：初值从上面的实际配色拷一份，面板一打开显示的就是当前颜色
+// 和面板里其他组一样已经解绑：拖滑块只改这里的值与色块，画面始终取 elementHSL
+const elementSandbox = {
+  fill: Object.assign({}, elementHSL.fill),
+  stroke: Object.assign({}, elementHSL.stroke)
+};
+
+// 上方面板底板的取色沙盒：初值就等于 COLOR.panelFill 对应的 hsl(199, 100%, 74%)
+// 这三个数已经和实际渲染解绑，拖动只改沙盒的色块和色值文本，底板颜色始终取 COLOR.panelFill
+const panelHSL = { h: 199, s: 100, l: 74 };
+
+// 面板选项槽的取色沙盒：初值就等于 COLOR.slotFill 对应的 hsl(200, 100%, 79%)
+// 和 panelHSL 一样已经和实际渲染解绑，拖动只改沙盒的色块和色值文本，槽填充始终取 COLOR.slotFill
+const slotHSL = { h: 200, s: 100, l: 79 };
+
+// 设置齿轮与它所在槽的实际配色：画面取这里，是真正的颜色来源
+const settingsHSL = {
+  gearFill: { h: 207, s: 89, l: 55 },    // 齿轮填充：初值同元件填充
+  gearStroke: { h: 210, s: 80, l: 42 },  // 齿轮描边：初值同元件描边
+  slotFill: { h: 200, s: 100, l: 79 },   // 设置槽底板填充：初值同元件槽填充
+  slotStroke: { h: 199, s: 92, l: 56 }   // 设置槽底板描边：初值同元件槽描边
+};
+
+// 调试面板里那四组滑块的取色沙盒：初值从上面的实际配色拷一份，所以面板一打开显示的就是当前颜色
+// 但两者已经解绑：拖滑块只改这里的值和面板上的色块，画面始终取 settingsHSL，调参不会误改实际颜色
+const settingsSandbox = {
+  gearFill: Object.assign({}, settingsHSL.gearFill),
+  gearStroke: Object.assign({}, settingsHSL.gearStroke),
+  slotFill: Object.assign({}, settingsHSL.slotFill),
+  slotStroke: Object.assign({}, settingsHSL.slotStroke)
+};
+
+// 元件选择面板各槽放的类型：下标即类型下标，第一个元件槽放的就是第 0 个类型
+const PANEL_SLOT_TYPES = ["deflector", "transmitter", "light", "inverter", "lamp"];
+
+// 「选中」工具槽的序号：插在所有元件槽的最左侧，所以是 0
+// 它和元件槽一样占一个槽位、一样走悬停与按下的动画，但不是元件槽，不参与放置类型和简介
+const SELECT_SLOT_INDEX = 0;
+
+// 第一个元件槽的序号：紧跟在选中槽右边
+// 元件槽的序号一律由它推算，以后还想在最左边再加工具槽，只改这一个数即可
+const ELEMENT_SLOT_BASE = SELECT_SLOT_INDEX + 1;
+
+// 设置按钮在槽动画数组里的下标：排在所有元件槽之后
+// 给它一个正式序号，悬停与按下就自动走元件槽那同一套，不必再维护第二份状态，手感也不会走样
+const SETTINGS_SLOT_INDEX = CONFIG.panelSlotCount;
+
+// 文件按钮在槽动画数组里的下标：紧挨着设置按钮的左边，所以序号再往后一位
+// 同样给正式序号，悬停与按下复用元件槽那套动画，和设置按钮手感完全一致
+const FILE_SLOT_INDEX = SETTINGS_SLOT_INDEX + 1;
+
+// 教程按钮在槽动画数组里的下标：紧挨着文件按钮的左边，所以序号再往后一位
+// 同样给正式序号，悬停与按下复用元件槽那套动画，三个按钮手感完全一致
+const TUTORIAL_SLOT_INDEX = FILE_SLOT_INDEX + 1;
+
+// 判断某个槽序号是不是「元件槽」：元件槽才响应放置类型与简介，选中槽和两个按钮槽都不算
+// 以后再加按钮时，只要它的序号排在元件槽之后，这里不必改
+function isElementSlot(i) {
+  return i >= ELEMENT_SLOT_BASE && i < ELEMENT_SLOT_BASE + PANEL_SLOT_TYPES.length;
+}
+
+// 判断某个槽序号是不是「可选中的槽」：选中槽和元件槽都能点中并高亮，两个按钮槽不能
+// 按钮槽有自己的开关状态，不参与选中，所以不能拿 isElementSlot 反过来当「不可选」
+function isPickableSlot(i) {
+  return i === SELECT_SLOT_INDEX || isElementSlot(i);
+}
+
+// WASD 对应的朝向索引：与元件的朝向索引同一套编号（0 上 1 右 2 下 3 左）
+// 按键直接拨到目标朝向，只走最近的一条路，转多少交给旋转动画去补
+const DIR_KEYS = { KeyW: 0, KeyD: 1, KeyS: 2, KeyA: 3 };
+
+/* SVG 相关常量 */
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/* 元件类型表 */
+// 形状统一用「本地坐标点列」描述：原点在元件中心、顶点朝 -y（屏幕 y 轴向下，所以 -y 即世界正上方）
+// SVG 与 Canvas 两套渲染都从这份点列生成路径，形状只维护一处，两边不会各自漂移
+// desc 是悬停选项槽时显示的简介，与形状定义放在一起，新增类型时不会漏写
+// blocksH / blocksV 是元件自身坐标下的阻挡属性，旋转后按 dir 映射到全局轴，重建阻挡图时读取
+const ELEMENT_TYPES = {
+  // 偏转器：等腰三角形，顶点朝上、底边平直
+  deflector: {
+    name: "偏转器",
+    desc: "从任意方向入射的激光都会被偏转到箭头指向的方向。",
+    blocksH: true,   // 自身坐标下的水平阻挡：偏转器是镜子，水平来光必须先被截住才谈得上「偏转」
+    blocksV: true,   // 自身坐标下的垂直阻挡：同理，垂直来光也要截住
+    points: [
+      [0, -CONFIG.elementLen / 2],
+      [CONFIG.elementWid / 2, CONFIG.elementLen / 2],
+      [-CONFIG.elementWid / 2, CONFIG.elementLen / 2]
+    ]
+  },
+  // 透射器：外形同偏转器，但底边朝顶点方向内凹，凹点取底边中点，于是成四边形
+  transmitter: {
+    name: "透射器",
+    desc: "从任意方向入射的激光都会被偏转到箭头指向的方向，但是入射激光会继续向前。",
+    blocksH: false,  // 自身坐标下的水平阻挡：不阻挡，水平来光直接穿过，这就是「继续向前」
+    blocksV: false,  // 自身坐标下的垂直阻挡：不阻挡，垂直来光同样穿过
+    points: [
+      [0, -CONFIG.elementLen / 2],
+      [CONFIG.elementWid / 2, CONFIG.elementLen / 2],
+      [0, CONFIG.elementLen / 2 - CONFIG.elementNotch],
+      [-CONFIG.elementWid / 2, CONFIG.elementLen / 2]
+    ]
+  },
+  // 光源：矩形主体 + 尖头三角拼成的五边形，形如一个指向上方的箭头
+  // 矩形与三角的分界高度取 len × (headRatio - 0.5)，headRatio 即尖头段占整长的比例
+  light: {
+    name: "光源",
+    desc: "开启时，向前方发出激光。",
+    blocksH: true,   // 自身坐标下的水平阻挡：光源是实体，来光到它中心即终止
+    blocksV: true,   // 自身坐标下的垂直阻挡：同理
+    points: [
+      [0, -CONFIG.elementLen / 2],
+      [CONFIG.elementWid / 2, CONFIG.elementLen * (CONFIG.elementHeadRatio - 0.5)],
+      [CONFIG.elementWid / 2, CONFIG.elementLen / 2],
+      [-CONFIG.elementWid / 2, CONFIG.elementLen / 2],
+      [-CONFIG.elementWid / 2, CONFIG.elementLen * (CONFIG.elementHeadRatio - 0.5)]
+    ]
+  },
+  // 反相器：等腰三角形 + 顶点上的小圆，即非门符号；气泡画在箭头所指的那一侧
+  // 三角形比偏转器矮，气泡圆心正好压在顶点上，两者合起来的高度才放得进一格
+  // 形状与偏转器同为实心三角形，所以两个轴都阻挡：输入光必须被截住，否则会穿过它去误触发下游元件
+  inverter: {
+    name: "反相器",
+    desc: "没有收到激光时朝箭头方向发射，一旦收到激光就停止发射。",
+    blocksH: true,   // 自身坐标下的水平阻挡：截断输入光，不让它穿过去误触发后面的元件
+    blocksV: true,   // 自身坐标下的垂直阻挡：同理
+    points: [
+      [0, -CONFIG.inverterLen / 2],
+      [CONFIG.elementWid / 2, CONFIG.inverterLen / 2],
+      [-CONFIG.elementWid / 2, CONFIG.inverterLen / 2]
+    ],
+    bubble: CONFIG.elementBubbleR  // 气泡半径（世界单位）；只有非门符号带气泡，其他类型没有这个字段
+  },
+  // 灯：圆角很大的正方形，被激光照到时整块变淡红并向外发淡红光晕
+  // 它只作指示，收到光也不发射；形状用 roundRect 描述，两套渲染各自按弧线画，不走点列
+  lamp: {
+    name: "灯",
+    desc: "被激光照射到时亮起。",
+    blocksH: true,   // 自身坐标下的水平阻挡：灯是实体，来光到它中心即终止
+    blocksV: true,   // 自身坐标下的垂直阻挡：同理，垂直来光也要截住
+    // 半边长单独配，取 0.3 比其它元件的 0.35 略小一圈，放在一起时不会显得抢眼
+    roundRect: { half: CONFIG.lampHalf, r: CONFIG.lampRadius }
+  }
+};
+
+// 反相器的最终几何：气泡圆心落在三角形顶点上，整个符号（三角形+气泡）再整体下移，使包围盒在格心居中
+// 下移量取半径的一半：气泡只在顶点外侧探出一个半径，取一半正好让上下留白相等，四个朝向旋转都不会出格
+// 两侧边在气泡上的交点由「沿侧边走到离顶点一个半径处」解出，SVG 与 Canvas 两套路径共用这组数
+function bubbleGeometry(typeId) {
+  const dx = CONFIG.elementWid / 2;              // 三角形底边半宽
+  const dy = CONFIG.inverterLen;                 // 三角形顶点到底边的竖直长度
+  const r = ELEMENT_TYPES[typeId].bubble;        // 气泡半径
+  const shift = r / 2;                           // 整体下移量，让「三角形∪气泡」的包围盒在格心居中
+  const yApex = -dy / 2 + shift;                 // 顶点 y，同时也是气泡圆心的 y
+  const yBase = dy / 2 + shift;                  // 底边 y
+  const s = r / Math.sqrt(dx * dx + dy * dy);    // 交点沿侧边的参数：离顶点一个半径处就是切出点
+  const half = dx * s;                           // 交点相对圆心的水平偏移
+  const drop = dy * s;                           // 交点相对圆心的竖直偏移
+  const phi = Math.atan2(half, drop);            // 交点偏离「正下方」的角度，决定圆弧要扫过多大范围
+  return { dx: dx, yApex: yApex, yBase: yBase, r: r, half: half, drop: drop, phi: phi };
+}
+
+// 把类型点列转成 SVG 的路径字符串（d 属性）
+// 带 bubble 的类型（非门）走另一条分支：三角形两侧边在气泡上截断，中间用一段大圆弧接起来
+// 于是整条路径就是「三角形∪气泡」的外轮廓，描边只勾一圈，不会在三角形内部多出一道弧线
+function elementPathD(typeId) {
+  const t = ELEMENT_TYPES[typeId];
+  if (t.bubble) {
+    const g = bubbleGeometry(typeId);
+    const cy = g.yApex + g.drop;                 // 两个交点等高，圆弧从这里起、也从这里落
+    // 从左侧交点顺时针绕过顶部到右侧交点：扫过 2π-2φ 超过半圈，所以 large-arc 与 sweep 都取 1
+    return "M " + (-g.dx) + " " + g.yBase +
+      " L " + (-g.half) + " " + cy +
+      " A " + g.r + " " + g.r + " 0 1 1 " + g.half + " " + cy +
+      " L " + g.dx + " " + g.yBase + " Z";
+  }
+  if (t.roundRect) {
+    // 圆角正方形：四条直边 + 四段四分之一圆弧，每段弧的 sweep 取 1 表示顺时针接向下一条边
+    const h = t.roundRect.half;   // 半边长
+    const r = t.roundRect.r;      // 圆角半径
+    return "M " + (-h + r) + " " + (-h) +
+      " L " + (h - r) + " " + (-h) +
+      " A " + r + " " + r + " 0 0 1 " + h + " " + (-h + r) +
+      " L " + h + " " + (h - r) +
+      " A " + r + " " + r + " 0 0 1 " + (h - r) + " " + h +
+      " L " + (-h + r) + " " + h +
+      " A " + r + " " + r + " 0 0 1 " + (-h) + " " + (h - r) +
+      " L " + (-h) + " " + (-h + r) +
+      " A " + r + " " + r + " 0 0 1 " + (-h + r) + " " + (-h) +
+      " Z";
+  }
+  const pts = t.points;
+  let d = "M " + pts[0][0] + " " + pts[0][1];
+  for (let i = 1; i < pts.length; i++) d += " L " + pts[i][0] + " " + pts[i][1];
+  d += " Z";
+  return d;
+}
+
+// 把类型点列描成 Canvas 路径；调用前坐标系必须已经平移到元件中心并按需缩放好
+// 气泡分支与 SVG 侧取同一组几何数，描出的外轮廓完全一致，两边不会各自漂移
+function traceElementPath(typeId) {
+  const t = ELEMENT_TYPES[typeId];
+  ctx.beginPath();
+  if (t.bubble) {
+    const g = bubbleGeometry(typeId);
+    // Canvas 的角度从 +x 轴起、顺时针增大；交点落在「正下方」偏 φ 处，所以起点取 π/2+φ
+    const start = Math.PI / 2 + g.phi;
+    ctx.moveTo(-g.dx, g.yBase);
+    ctx.lineTo(-g.half, g.yApex + g.drop);
+    ctx.arc(0, g.yApex, g.r, start, start + (Math.PI * 2 - g.phi * 2), false);
+    ctx.lineTo(g.dx, g.yBase);
+    ctx.closePath();
+    return;
+  }
+  if (t.roundRect) {
+    // 圆角正方形交给标准的 roundRect：x/y 取左上角，宽高是边长的两倍，第 5 个参数直接给圆角半径
+    const h = t.roundRect.half;
+    ctx.roundRect(-h, -h, h * 2, h * 2, t.roundRect.r);
+    return;
+  }
+  const pts = t.points;
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+}
+
+// 当前选中的元件类型：虚影形状与放置出的元件都取它，切换选择时只改 slotSelectedIndex 这一处
+// 槽序号与类型下标差一个基准，减掉它才是类型下标
+// 选中槽不是元件槽，没有对应类型，返回 null：调用方据此知道「手上没拿元件」
+function selectedTypeId() {
+  if (slotSelectedIndex === SELECT_SLOT_INDEX) return null;
+  return PANEL_SLOT_TYPES[slotSelectedIndex - ELEMENT_SLOT_BASE];
+}
+
+/* ========== 状态变量（集中声明，含类型与默认值） ========== */
+
+let canvas = null;        // HTMLCanvasElement：画布
+let ctx = null;           // CanvasRenderingContext2D：2D 上下文
+let elemLayer = null;     // SVGSVGElement：元件层
+let clipRect = null;      // SVGRectElement：元件层的裁剪矩形，跟随视口
+
+const elements = [];      // Array<{wx:number, wy:number, dir:number, angle:number, angleTarget:number, typeId:string, node:SVGPathElement, deleting:boolean, deleteP:number, on:boolean, out:number}>：已放置的元件，wx/wy 为格心世界坐标，dir 为朝向索引（0 上 1 右 2 下 3 左），angle/angleTarget 是旋转动画的角度，typeId 是元件类型（决定路径形状），deleting/deleteP 是删除动画状态，on 是光源的开关状态（外部点击切换），out 是本微帧要发射的方向位掩码（光源不用它，偏转器与透射器由 scheduleOutputs 排）
+
+/* 阻挡图：把「谁挡谁」从坐标问题变成下标问题，结算时读表即可，不必每微帧扫坐标 */
+// 只在元件增删或朝向定下来之后重建（由 dirty 标记），其余时候一直复用
+const rayGraph = {
+  dirty: true,   // boolean：是否需要重建；元件增删、朝向改变时置 true，重建后归 false
+  rows: null,    // Map<number, Array<number>>：key 为 wy，value 是该行存活元件在 elements 中的下标，按 wx 升序
+  cols: null,    // Map<number, Array<number>>：key 为 wx，value 是该列存活元件在 elements 中的下标，按 wy 升序
+  endR: null,    // Array<number>：每个元件向右第一个阻挡者的行位置；右边没人挡则记行数组长度，表示延伸到视口外
+  endL: null,    // Array<number>：向左第一个阻挡者的行位置；左边没人挡记 -1
+  endD: null,    // Array<number>：向下（视觉向下，即 wy 减小）第一个阻挡者的列位置；下边没人挡记 -1
+  endU: null     // Array<number>：向上（wy 增大）第一个阻挡者的列位置；上边没人挡则记列数组长度，表示延伸到视口外
+};
+
+/* 接收掩码：每微帧算一次，记录激光从哪几侧到达每个元件 */
+// 位序与朝向索引一致：0 上、1 右、2 下、3 左，于是 1 << dir 正好就是「朝 dir 发射」这一位
+const SIDE_UP = 1;      // number：上侧位
+const SIDE_RIGHT = 2;   // number：右侧位
+const SIDE_DOWN = 4;    // number：下侧位
+const SIDE_LEFT = 8;    // number：左侧位
+let recvMask = [];      // Array<number>：以 elements 下标为索引的四位掩码，某位为 1 表示该侧有发射者的激光射到它
+let laserSegments = []; // Array<{horizontal:boolean, key:number, a:number, b:number}>：本微帧激光场取并集后的线段，a/b 可能是 ±Infinity
+let microframe = 0;     // number：全局微帧计数 t，整数，从 0 起只增不减；元件的接收与输出时刻都以它为准
+let microAcc = 0;       // number：固定步长累加器（秒），攒够当前微帧时长就结算一个微帧，余数留到下一帧
+let lastEmit = null;    // Array<number>|null：上一微帧的发射掩码，用来判断本微帧是否需要重算；阻挡图重建后置 null
+
+let sceneDirty = true;    // boolean：场景是否有非连续变化（尺寸、配色、选中槽、激光场）需要强制重绘一次
+let prevSettled = false;  // boolean：上一帧是否完全静止；动画收尾那一帧它还是 false，保证最终状态一定被画出来
+let gridCache = null;     // HTMLCanvasElement：网格层的离屏位图，相机停住后直接贴它，省掉重建几百条网格线
+let gridCacheCtx = null;  // CanvasRenderingContext2D：离屏位图的上下文，与位图一起按需重建
+let gridCacheKey = "";    // string：缓存对应的相机与尺寸指纹，指纹不一致就说明缓存作废，空串表示缓存已弃用
+
+let paletteUI = null;     // {fill,stroke,panel,slot,gearFill,gearStroke,setFill,setStroke}：调色器面板的 DOM 引用，没初始化前为 null
+
+let ghostNode = null;     // SVGPathElement：虚影节点，路径取当前选中的元件类型
+let ghostWX = 0;          // number：虚影当前世界坐标 X（平滑值）
+let ghostWY = 0;          // number：虚影当前世界坐标 Y（平滑值）
+let ghostTWX = 0;         // number：虚影目标格心的世界坐标 X
+let ghostTWY = 0;         // number：虚影目标格心的世界坐标 Y
+let ghostVisible = false; // boolean：虚影当前是否应该显示（指针在视口内且所在格可放置）
+let ghostAlpha = 0;       // number：虚影淡入淡出的当前系数，0 为完全不可见、1 为完全可见
+let ghostRejectActive = false; // boolean：虚影是否正在走「进入不可放置格」的边移动边消失动画
+let ghostRejectP = 0;          // number：该动画的进度，0→1 线性推进
+let ghostRejectStartAlpha = 0; // number：动画开始瞬间的淡入系数，作为乘数保证透明度不跳变
+let ghostRejectFromWX = 0;     // number：动画起点的世界坐标 X，即进入不可放置格那一刻虚影所在位置
+let ghostRejectFromWY = 0;     // number：动画起点的世界坐标 Y
+let ghostRejectToWX = 0;       // number：动画终点的世界坐标 X，即不可放置格的格心
+let ghostRejectToWY = 0;       // number：动画终点的世界坐标 Y
+let ghostAngle = 0;       // number：虚影当前朝向的角度（度），动画期间是连续值，不一定是 90 的整数倍
+let ghostAngleTarget = 0; // number：虚影朝向的目标角度（度），WASD 拨到对应朝向；连续累积，不提前归一化
+let pointerSX = 0;        // number：指针在画布上的最后屏幕 X（CSS px）
+let pointerSY = 0;        // number：指针在画布上的最后屏幕 Y
+let pointerInside = false; // boolean：指针是否停留在画布内
+let slotHoverIndex = -1;  // number：指针当前悬停的选项槽序号，-1 表示没悬停在任何槽上
+let slotPressedIndex = -1; // number：指针正按住的选项槽序号，-1 表示没按住任何槽
+let slotSelectedIndex = ELEMENT_SLOT_BASE + 1; // number：当前选中的槽序号，默认第一个元件槽的下一格（透射器），手上的虚影即该类型
+const slotAnim = [];      // Array<Object>：每个槽一个缓动标量（newEased 建的），值即该槽当前的缩放比例
+let slotHoverTime = 0;    // number：指针在当前槽上已停留的秒数；换槽或移出立即归零，简介的延迟按它算
+let tipIndex = -1;        // number：简介浮层当前显示的槽序号，-1 表示没有浮层
+let marqueePressing = false; // boolean：左键已在画布上按下，但还没判定是单击还是拉框
+let marqueeActive = false;   // boolean：指针已移过阈值，正在拉框
+let marqueePointerId = -1;   // number：拉框所用的指针 id，-1 表示当前没有拉框；move/up 只认它自己的 id
+let marqueeStartSX = 0;      // number：拉框起点屏幕 X，按下那一刻的位置，拉框期间不变
+let marqueeStartSY = 0;      // number：拉框起点屏幕 Y
+let marqueeEndSX = 0;        // number：拉框终点屏幕 X，跟着指针走
+let marqueeEndSY = 0;        // number：拉框终点屏幕 Y
+let moveDragging = false;    // boolean：左键按在已选中的元件上，正在拖动这批元件
+let movePointerId = -1;      // number：拖动所用的指针 id，-1 表示当前没有拖动；move/up 只认它自己的 id
+let moveStartWX = 0;         // number：按下那一刻指针所在的世界坐标 X，拖动全程以它为基准算位移
+let moveStartWY = 0;         // number：按下那一刻指针所在的世界坐标 Y
+let moveDGX = 0;             // number：当前已经加在元件上的整数格位移（X 方向），用来只补差值、避免重复累加
+let moveDGY = 0;             // number：当前已经加在元件上的整数格位移（Y 方向）
+const moveGroup = [];        // Array<Object>：本次拖动带着走的元件；按下时确定，拖动期间不变
+let orbitActive = false;     // boolean：整批元件正在绕轴心公转，动画期间只改画面不改数据
+let orbitP = 0;              // number：公转进度 0→1，走满即落位
+let orbitTurns = 0;          // number：本次公转的 90° 步数，正数顺时针、负数逆时针
+let orbitPivotU = 0;         // number：公转轴心的格号 u（取选区几何中心，可能是半格；落位时统一吸附回格心）
+let orbitPivotV = 0;         // number：公转轴心的格号 v
+let selOrientDir = 0;        // number：选区整体的朝向索引（0 上、1 右、2 下、3 左）：WASD 转的就是它，新选区一律归零朝上
+let rotPivotU = 0;           // number：整批旋转的轴心格号 u（取选区几何中心，可能是半格；落位时统一吸附回格心）
+let rotPivotV = 0;           // number：整批旋转的轴心格号 v
+const tipAnim = newEased(0); // Object：简介浮层的显隐进度标量，0 全隐、1 全显，走缓入缓出曲线
+const tipDom = document.getElementById("slotTip");         // HTMLElement：简介浮层容器，独立于 Canvas，压在元件层之上
+const tipDomName = document.getElementById("slotTipName"); // HTMLElement：浮层里的元件名称
+const tipDomDesc = document.getElementById("slotTipDesc"); // HTMLElement：浮层里的元件说明
+let tipDomIndex = -1;     // number：浮层里已写入的槽序号，-1 表示内容为空；序号没变就不重复写文本
+
+// 设置按钮自身的状态：悬停与按下都交给槽那套下标逻辑管，这里只剩「开着还是关着」以及它驱动的提亮
+let settingsOpen = false;     // boolean：设置是否处于打开状态，默认关着；目前只驱动按钮发亮，还没有要打开的界面
+const settingsLitAnim = newEased(0);   // Object：设置按钮的提亮进度标量，0 常态、1 全亮；跟随设置的开合状态
+const settingsPanelDom = document.getElementById("settingsPanel"); // HTMLElement：设置弹窗容器，独立于 Canvas 的 DOM 层
+const filePanelDom = document.getElementById("filePanel");         // HTMLElement：文件弹窗容器，与设置弹窗同款外观
+const fileLitAnim = newEased(0);   // Object：文件按钮的提亮进度标量，0 常态、1 全亮；跟随文件弹窗的开合状态
+let filePanelOpen = false;    // boolean：文件弹窗是否打开；两个弹窗互斥，同时只开一个，避免两块底板叠在一起
+const tutorialLitAnim = newEased(0);   // Object：教程按钮的提亮进度标量，0 常态、1 全亮；跟随教程的开合状态
+let tutorialOpen = false;     // boolean：教程是否处于打开状态，默认关着；打开时屏幕正中弹出教程窗口
+const tutorialPanelDom = document.getElementById("tutorialPanel");         // HTMLElement：教程弹窗容器，独立于 Canvas 的 DOM 层
+const btnTutorialCancelDom = document.getElementById("btnTutorialCancel"); // HTMLElement：教程弹窗左上角的取消按钮
+const tutorialDocDom = document.getElementById("tutorialDoc");             // HTMLElement：教程弹窗里的内容区，以后教程文字就写进这里
+const tutorialModalAnim = newEased(0); // Object：教程弹窗的显隐进度标量，0 全隐、1 全显；时长与按钮提亮同一档，两者同步进退
+const fileNameDom = document.getElementById("fileName");           // HTMLElement：文件弹窗里显示当前存档名字的那行文字
+const btnOpenDom = document.getElementById("btnOpen");             // HTMLElement：文件弹窗里的「打开」按钮
+const btnSaveDom = document.getElementById("btnSave");             // HTMLElement：文件弹窗里的「保存」按钮
+const btnSaveAsDom = document.getElementById("btnSaveAs");             // HTMLElement：文件弹窗里的「另存为」按钮
+const btnImportSelDom = document.getElementById("btnImportSel");       // HTMLElement：文件弹窗里的「以选区导入」按钮
+const btnExportSelDom = document.getElementById("btnExportSel");       // HTMLElement：文件弹窗里的「以选区导出」按钮
+const SAVE_EXT = ".lccas";    // string：存档文件的后缀名；只有这一处写死，改名时改这里
+// 存档的文件类型声明：保存框与打开框共用一份，两边的扩展名写法才不会各写各的
+const SAVE_FILE_TYPES = [{ description: "激光逻辑门存档", accept: { "application/json": [SAVE_EXT] } }]; // Array：交给系统文件框的类型过滤表
+let currentFileName = "";     // string：当前存档的文件名（不含路径），空串表示还没存过，显示时用占位名代替
+let currentFileHandle = null; // FileSystemFileHandle | null：当前存档的文件句柄，null 表示还没绑定过文件
+// 上次用过的文件句柄：只用来给系统选择器定「从哪个目录起步」，与「当前绑定哪个文件」是两件事
+// 系统选择器默认每次都从文稿目录开，把句柄存进 IndexedDB 后跨会话也能读回，下次就从它所在目录打开
+const FS_DB_NAME = "laser-gate-files"; // string：存放文件句柄的小数据库名
+const FS_STORE_NAME = "handles";       // string：对象仓库名
+const FS_HANDLE_KEY = "last";          // string：上次用过的文件句柄在库里的键名
+let lastPickerHandle = null;           // FileSystemFileHandle | null：上次用过的文件句柄；启动时异步读回，读不到就是 null
+// 本地文件读写能力：保存对话框与打开对话框是同一批方法，任一存在就说明整条路线可用
+// 只在初始化时检测一次写死：这个能力在页面存活期间不会变，不必每帧重算
+const canUseLocalFile = "showSaveFilePicker" in window; // boolean：浏览器是否支持直接读写本地文件
+// 系统剪贴板写入能力：粘贴不走这个接口（它要授权且本地文件下不可靠），只有复制用它
+const canUseClipboard = !!(navigator.clipboard && navigator.clipboard.writeText); // boolean：浏览器是否支持直接写剪贴板
+const gridSwitchDom = document.getElementById("gridSwitch");       // HTMLElement：设置弹窗里「渲染网格」开关的滑轨
+let gridRenderOn = true;      // boolean：是否绘制网格线，默认开；关掉只隐藏网格线，视口底色与边框照旧
+const advSwitchDom = document.getElementById("advSwitch");          // HTMLElement：设置弹窗里「高级渲染」开关的滑轨
+let advancedRenderOn = true;  // boolean：是否启用高级渲染，默认开；目前只控制激光外围的辉光，关掉只剩光芯
+const speedSliderDom = document.getElementById("speedSlider");     // HTMLElement：设置弹窗里「运行速度」滑块
+const speedValueDom = document.getElementById("speedValue");       // HTMLElement：速度数值显示，在滑块右边
+let microDt = CONFIG.microframeDt;  // number：当前每个微帧对应的真实时长（秒），0 表示不设延迟；由速度滑块改写
+
+/* 撤销/重做：只记「已落定的电路」的差分，悬空中的那批不进历史 */
+// 每步存一组差分，一条差分描述一个元件的新增、消失或字段变化；不存整份电路，所以步数与电路大小无关
+let historyStack = [];     // Array<Array<Object>>：历史里每一步的差分清单
+let historyIndex = -1;     // number：当前走到历史里的哪一步，-1 表示还停在起点、没有可撤销的步
+let committedTable = new Map(); // Map<number, {rec:Object, el:Object}>：上一次落定时已落定电路的样子，按元件内部编号存
+let nextElementId = 1;     // number：元件内部编号的发号器；编号只在本程序内用来认人，不写进存档
+const HISTORY_LIMIT = 100; // number：最多保留多少步，超出丢掉最老的，避免长时间编辑把内存撑大
+
+const state = {
+  cssW: 0,                // number：画布 CSS 宽度
+  cssH: 0,                // number：画布 CSS 高度
+  anchorWX: CONFIG.defaultAnchorWX, // number：参考点的世界坐标 X
+  anchorWY: CONFIG.defaultAnchorWY, // number：参考点的世界坐标 Y
+  anchorSX: 0,            // number：参考点当前的屏幕 X（平滑值，平移时变化）
+  anchorSY: 0,            // number：参考点当前的屏幕 Y
+  tAnchorSX: 0,           // number：参考点屏幕 X 的目标值
+  tAnchorSY: 0,           // number：参考点屏幕 Y 的目标值
+  scale: CONFIG.defaultScale, // number：当前缩放（世界单位 → CSS px）
+  logScale: Math.log(CONFIG.defaultScale),  // number：当前缩放的对数（对数插值更自然）
+  tLogScale: Math.log(CONFIG.defaultScale), // number：缩放目标值的对数
+  isPanning: false,       // boolean：是否正在中键拖拽
+  panPointerId: null,     // number|null：正在拖拽的指针 id
+  panLastX: 0,            // number：上一次 pointermove 的屏幕 X，用来自己算位移
+  panLastY: 0,            // number：上一次 pointermove 的屏幕 Y
+  lastTs: 0               // number：上一帧时间戳（毫秒），用于计算 dt
+};
+
+/* ========== 工具函数 ========== */
+
+// 把 v 限制在 [lo, hi] 区间，用于钳制缩放范围
+function clamp(v, lo, hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// 指数缓出曲线：起步最快、越接近终点越慢；t = 0.1 时输出正好 0.5，即位移走完一半
+function easeOutExpo(t) {
+  return t >= 1 ? 1 : 1 - Math.pow(2, -10 * t);
+}
+
+// 三次缓出曲线：起步快、收尾慢；删除动画用它就是先迅速收缩、再收干净，反馈跟手
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+// 三次缓入缓出曲线：两端慢、中间快；简介浮层用它，出现和收起都不生硬
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// 建一个已停稳的缓动标量：cur 是当前值，from→to 在固定时长内按缓出曲线推进，t 到 1 表示停稳
+function newEased(value) {
+  return { cur: value, from: value, to: value, t: 1 };
+}
+
+// 把缓动标量朝目标推进：目标一变就从当前值重新起步，所以动画中途改目标也不会跳变
+// easing 可指定曲线，缺省是三次缓出；传 easeInOutCubic 就得到两端都慢的柔和动画
+function stepEased(a, to, dt, duration, easing) {
+  const ease = easing || easeOutCubic;
+  if (a.to !== to) {
+    a.from = a.cur;
+    a.to = to;
+    a.t = 0;
+  }
+  if (a.t >= 1) return;
+  a.t = Math.min(1, a.t + dt / duration);
+  a.cur = a.from + (a.to - a.from) * ease(a.t);
+}
+
+/* ========== 坐标变换 ========== */
+
+// 屏幕位置 = 参考点屏幕位置 + 世界偏移 × 缩放；用参考点表示，缩放时只有缩放量在变，位移天然单调
+function worldToScreenX(wx) {
+  return state.anchorSX + (wx - state.anchorWX) * state.scale;
+}
+
+// 世界 Y → 屏幕 Y：屏幕 Y 向下、世界 Y 向上，所以取负号
+function worldToScreenY(wy) {
+  return state.anchorSY - (wy - state.anchorWY) * state.scale;
+}
+
+// 屏幕 X → 世界 X，用于把鼠标位置换算成世界坐标
+function screenToWorldX(sx) {
+  return state.anchorWX + (sx - state.anchorSX) / state.scale;
+}
+
+// 屏幕 Y → 世界 Y
+function screenToWorldY(sy) {
+  return state.anchorWY - (sy - state.anchorSY) / state.scale;
+}
+
+// 世界 X 所在格子的格心 X：格子是 [i, i+1]，格心即 i+0.5；floor 对负数同样正确
+function cellCenterX(wx) {
+  return Math.floor(wx) + 0.5;
+}
+
+// 世界 Y 所在格子的格心 Y
+function cellCenterY(wy) {
+  return Math.floor(wy) + 0.5;
+}
+
+/* ========== 尺寸与视口 ========== */
+
+// 按 devicePixelRatio 调整画布位图尺寸，并把绘制坐标系统一到 CSS 像素
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  state.cssW = window.innerWidth;
+  state.cssH = window.innerHeight;
+  canvas.width = Math.round(state.cssW * dpr);
+  canvas.height = Math.round(state.cssH * dpr);
+  canvas.style.width = state.cssW + "px";
+  canvas.style.height = state.cssH + "px";
+  // setTransform 只在这里设置一次；后续所有绘制都用 CSS 像素坐标，避免高清屏模糊
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// 计算视口矩形：画布内缩固定边距，网格只在这个矩形内显示
+// 上边额外让出 panelHeight 的空白给元件选择面板；画布本身仍是全窗口且左上角在原点，
+// 所以指针坐标不用做任何偏移换算，视口之外（含上方空白）由 isInViewport 统一挡掉
+function getViewport() {
+  const m = CONFIG.viewportMargin;
+  const top = m + CONFIG.panelHeight;
+  const w = Math.max(0, state.cssW - m * 2);
+  // 底部要再给那条栏腾地方：栏高加上下各一个 panelGap，视口高度相应缩短，栏才不会压在网格上
+  const bottom = CONFIG.panelGap * 2 + CONFIG.bottomBarHeight;
+  const h = Math.max(0, state.cssH - top - bottom);
+  return { x: m, y: top, w: w, h: h };
+}
+
+// 屏幕点是否落在视口内：视口外的网格不显示，虚影与放置遵循同一条边界
+function isInViewport(sx, sy) {
+  const vp = getViewport();
+  return sx >= vp.x && sx <= vp.x + vp.w && sy >= vp.y && sy <= vp.y + vp.h;
+}
+
+/* ========== 网格绘制 ========== */
+
+// 把网格画到指定上下文：视口内填淡蓝底，再描一遍全部网格线
+// 单独抽出来是为了同一份绘制代码既服务主画布、也服务离屏缓存，两处不会各自漂移
+function paintGrid(g, vp) {
+  // 永远只画最小格子（1×1），不随缩放合并成更大的格子；缩小时线会变密，这是预期行为
+  const step = CONFIG.gridUnit;
+
+  // 视口内可见的世界坐标范围，用于只画屏幕内需要的线
+  const leftWorld = screenToWorldX(vp.x);
+  const rightWorld = screenToWorldX(vp.x + vp.w);
+  const topWorld = screenToWorldY(vp.y);
+  const bottomWorld = screenToWorldY(vp.y + vp.h);
+
+  g.save();
+  // 裁剪到视口矩形：这是「视口外不显示」的关键
+  g.beginPath();
+  g.rect(vp.x, vp.y, vp.w, vp.h);
+  g.clip();
+
+  g.fillStyle = COLOR.background;
+  g.fillRect(vp.x, vp.y, vp.w, vp.h);
+
+  // 关掉网格渲染时到此为止：视口底色保留，省掉每帧几百条线的描边，画面仍能看出视口范围
+  if (!gridRenderOn) {
+    g.restore();
+    return;
+  }
+
+  // 所有网格线粗细、颜色完全一致，攒成一条路径一次描边（逐条 stroke 会明显变慢）
+  const path = new Path2D();
+
+  // 竖线：世界 x = n * step
+  const nStartX = Math.ceil(leftWorld / step);
+  const nEndX = Math.floor(rightWorld / step);
+  for (let n = nStartX; n <= nEndX; n++) {
+    // 保留浮点位置，不做像素取整：取整会让每条线在不同帧各自跳 1px，间距忽宽忽窄，看起来就是抖动
+    const sx = worldToScreenX(n * step);
+    path.moveTo(sx, vp.y);
+    path.lineTo(sx, vp.y + vp.h);
+  }
+
+  // 横线：世界 y = n * step
+  const nStartY = Math.ceil(bottomWorld / step);
+  const nEndY = Math.floor(topWorld / step);
+  for (let n = nStartY; n <= nEndY; n++) {
+    // 同样不做像素取整，理由同竖线
+    const sy = worldToScreenY(n * step);
+    path.moveTo(vp.x, sy);
+    path.lineTo(vp.x + vp.w, sy);
+  }
+
+  g.lineWidth = 1;
+  g.strokeStyle = COLOR.line;
+  g.stroke(path);
+
+  g.restore();
+}
+
+// 画网格：相机还在动时直接画到主画布；相机停住后改成贴一张离屏位图，省掉每帧重建几百条线
+// 网格只跟相机与画布尺寸有关，激光、元件、虚影在动的时候它其实一动不动，这正是可以缓存的前提
+function drawGrid(vp) {
+  const dpr = window.devicePixelRatio || 1;
+  // 相机正在平移或缩放：网格每帧都在变，缓存必然失效，直接画反而省下一次整屏拷贝
+  const cameraMoving = state.anchorSX !== state.tAnchorSX || state.anchorSY !== state.tAnchorSY ||
+    state.logScale !== state.tLogScale;
+  if (cameraMoving) {
+    gridCacheKey = "";  // 弃用旧缓存，相机停下后必定重画一张
+    paintGrid(ctx, vp);
+    return;
+  }
+  // 相机与画布尺寸的指纹：任一项变了都说明上一张位图不能再用
+  const key = state.anchorSX + "|" + state.anchorSY + "|" + state.logScale + "|" +
+    state.cssW + "|" + state.cssH + "|" + dpr;
+  if (gridCacheKey !== key) {
+    if (gridCache === null) {
+      gridCache = document.createElement("canvas");
+      gridCacheCtx = gridCache.getContext("2d");
+    }
+    const w = Math.round(state.cssW * dpr);
+    const h = Math.round(state.cssH * dpr);
+    // 位图尺寸跟着画布走，否则换了窗口大小会贴出一张被拉伸的旧图
+    if (gridCache.width !== w || gridCache.height !== h) {
+      gridCache.width = w;
+      gridCache.height = h;
+    }
+    // 离屏也用 CSS 像素坐标系，与主画布同一套，绘制代码才能原样复用
+    gridCacheCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    gridCacheCtx.clearRect(0, 0, state.cssW, state.cssH);
+    paintGrid(gridCacheCtx, vp);
+    gridCacheKey = key;
+  }
+  // 位图按 CSS 尺寸贴回：主画布的变换已含 dpr，正好一比一落到物理像素上，不会糊
+  ctx.drawImage(gridCache, 0, 0, state.cssW, state.cssH);
+}
+
+// 画激光场：把每段裁到视口范围，再描两遍——先粗的半透明外光，后细的实心光芯
+// 线段端点可能是 ±Infinity，夹到视口的世界范围即可，不必真去算无穷远
+// 不缓存路径：裁剪结果依赖当前相机，而线段条数很少，每帧重建这点开销远小于维护缓存的复杂度
+function drawLaser(vp) {
+  if (laserSegments.length === 0) return;
+
+  // 视口对应的世界范围：注意屏幕 y 向下、世界 y 向上，所以上边界对应 maxY
+  const minX = screenToWorldX(vp.x);
+  const maxX = screenToWorldX(vp.x + vp.w);
+  const minY = screenToWorldY(vp.y + vp.h);
+  const maxY = screenToWorldY(vp.y);
+
+  ctx.save();
+  // 裁剪到视口：延伸到视口外的激光不该画到面板或画布空白处
+  ctx.beginPath();
+  ctx.rect(vp.x, vp.y, vp.w, vp.h);
+  ctx.clip();
+
+  // 所有线段攒成一条路径，下面两次 stroke 复用同一条，不必各建一次
+  ctx.beginPath();
+  for (let j = 0; j < laserSegments.length; j++) {
+    const s = laserSegments[j];
+    if (s.horizontal) {
+      // 行上的线段：固定坐标是 wy，变化坐标是 wx
+      if (s.key < minY || s.key > maxY) continue;  // 整条线在视口上下之外，跳过
+      const a = Math.max(s.a, minX);
+      const b = Math.min(s.b, maxX);
+      if (a > b) continue;                          // 裁完为空，说明这段在视口左右之外
+      ctx.moveTo(worldToScreenX(a), worldToScreenY(s.key));
+      ctx.lineTo(worldToScreenX(b), worldToScreenY(s.key));
+    } else {
+      // 列上的线段：固定坐标是 wx，变化坐标是 wy
+      if (s.key < minX || s.key > maxX) continue;
+      const a = Math.max(s.a, minY);
+      const b = Math.min(s.b, maxY);
+      if (a > b) continue;
+      ctx.moveTo(worldToScreenX(s.key), worldToScreenY(a));
+      ctx.lineTo(worldToScreenX(s.key), worldToScreenY(b));
+    }
+  }
+
+  ctx.lineCap = "round";  // 圆头：线段末端不出现生硬的方角
+  const w = CONFIG.laserWidth * state.scale;
+  // 铺辉光：若干层同心描边由内到外依次变宽变淡，叠出连续衰减
+  // 用多层而不是「一圈固定宽度的半透明」，是因为后者边缘是硬的，看起来像一条带子而不是光晕
+  // 关掉高级渲染就整段跳过：只剩最内层的光芯，激光的走向照样看得清，省下每层一次整路径描边
+  if (advancedRenderOn) {
+    const N = CONFIG.laserGlowLayers;
+    ctx.strokeStyle = COLOR.laserGlow;
+    for (let k = 0; k < N; k++) {
+      const t = k / N;                  // 0 贴着光芯，越接近 1 越靠外
+      const fade = (1 - t) * (1 - t);   // 二次衰减：近处降得慢、远处迅速消失，观感更柔
+      ctx.lineWidth = w * (1 + (CONFIG.laserGlowSpread - 1) * t);
+      ctx.globalAlpha = CONFIG.laserGlowAlpha * fade;
+      ctx.stroke();                     // 每层复用同一条路径，不重建
+    }
+  }
+  // 最后描光芯：实色不透明，压在最内层之上，保证中心是一根清晰的白线
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = w;
+  ctx.strokeStyle = COLOR.laserCore;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// 画灯的光晕：被照亮的灯在元件层之下铺一团淡红辉光，元件本体是独立 SVG 图层，天然压在光晕中心上
+// 关掉高级渲染就整段跳过，与激光辉光保持一致；强度随亮起进度一起涨落，灯不会突然冒出一团光
+// 用高斯模糊把灯的轮廓整体向外化开，而不是画一个圆形渐变：
+// 圆形渐变与方形灯形状对不上，光晕在四角和四边深浅不一，看上去就是一圈能看出来的边界
+// 模糊的是灯本身那个圆角方框，所以光晕天然贴着灯的轮廓，由内到外连续变淡，没有硬边
+function drawLampGlow(vp) {
+  if (!advancedRenderOn) return;
+  // 画布滤镜是标准能力，万一浏览器不支持就别画了：宁可没有光晕，也不要画出一圈硬邦邦的色块
+  if (typeof ctx.filter !== "string") return;
+  ctx.save();
+  // 裁剪到视口：视口外的灯不该把光晕画到面板或画布空白处
+  ctx.beginPath();
+  ctx.rect(vp.x, vp.y, vp.w, vp.h);
+  ctx.clip();
+  // 模糊半径随缩放走，灯放大时光晕跟着一起放大，观感始终一致
+  ctx.filter = "blur(" + (CONFIG.lampGlowBlur * state.scale) + "px)";
+  ctx.fillStyle = COLOR.lampGlow;
+  const h = CONFIG.lampHalf * state.scale;        // 光晕底形与灯同大，模糊后自然向外晕出
+  const r = CONFIG.lampRadius * state.scale;
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.typeId !== "lamp" || el.deleting) continue;
+    const k = el.litP.cur;
+    if (k <= 0) continue;  // 没亮的灯完全不画，省掉一次建路径与模糊
+    // 位置取画面的视觉位置：数据位置加上拖动缓动偏移，光晕才跟着灯一起滑
+    const cx = worldToScreenX(el.wx + el.mvOffU);
+    const cy = worldToScreenY(el.wy + el.mvOffV);
+    // 模糊会把边缘摊薄一半，所以贴边处约是这里的一半浓度，整体就是一层淡红
+    ctx.globalAlpha = CONFIG.lampGlowAlpha * k;
+    ctx.beginPath();
+    ctx.roundRect(cx - h, cy - h, h * 2, h * 2, r);
+    ctx.fill();
+  }
+  ctx.filter = "none";   // 复位滤镜，别把后续绘制也糊掉
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// 画视口边框，明确标出可显示区域的边界
+function drawViewportBorder(vp) {
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLOR.border;
+  ctx.strokeRect(vp.x + 1, vp.y + 1, vp.w - 2, vp.h - 2);
+  ctx.restore();
+}
+
+// 画上方元件面板的占位矩形：左右两条边与网格视口边框严格对齐（同 x、同宽度）
+// 线宽和颜色直接沿用视口边框，两者是同一套外框样式，看起来才是一体的
+// +1/-2 的写法和视口边框一致：让 2px 描边整个落在矩形内部，外沿正好压在 vp.x 与 vp.x + vp.w 上
+function drawPanelBox(vp) {
+  const gap = CONFIG.panelGap;
+  const x = vp.x;
+  const w = vp.w;
+  const y = gap;
+  const h = vp.y - gap * 2; // 上下各留 gap，中间才是矩形
+  ctx.save();
+  // 底板色硬编码取 COLOR.panelFill，与调试面板的 HSL 滑块解绑：滑块只当取色沙盒，不影响实际渲染
+  // 先铺底色再描边：填充范围同样内缩 1px，正好落在描边内侧，边界上不会露出半像素白边
+  ctx.fillStyle = COLOR.panelFill;
+  ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLOR.border;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.restore();
+}
+
+// 画底部那条栏：风格与上方元件面板完全一致（同底色、同线宽、同描边色、同样是直角），只是高度减半
+// 左右两条边同样与网格视口边框对齐；上下各留一个 panelGap，整页上下才是对称的
+// 栏内只放一行随状态变化的操作提示，具体文字见 hintText
+function drawBottomBar(vp) {
+  const gap = CONFIG.panelGap;
+  const h = CONFIG.bottomBarHeight;
+  const x = vp.x;
+  const w = vp.w;
+  const y = state.cssH - gap - h;  // 底边离窗口底一个 gap，从下往上量出栏高
+  ctx.save();
+  ctx.fillStyle = COLOR.panelFill;
+  ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLOR.border;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.restore();
+}
+
+// 当前有没有选中的元件：删除动画中的不算，它已经退出模拟，也不该算进选区
+function hasSelectedElement() {
+  for (let i = 0; i < elements.length; i++) {
+    if (elements[i].selected && !elements[i].deleting) return true;
+  }
+  return false;
+}
+
+// 底栏提示的文字：按当前状态挑一条最相关的，回答的是「我现在这一刻能干什么」，不是一份说明书
+// 顺序就是优先级，越靠前越具体：正在做的动作 > 手上有东西 > 指针下的东西 > 手上拿的工具 > 默认
+// 每次重绘都重算一遍，所以不必另外维护一份「当前提示」，状态一变提示自然就跟着变
+// 默认状态返回空串，栏里就空着，不硬凑一句话
+function hintText() {
+  // 正在拉框 / 正在拖动选区：这时候最该说清的是「松手之后会怎样」
+  if (marqueeActive) return "松开完成框选";
+  if (moveDragging) return "松手仍是悬空；点空白处才落地";
+  // 手上有选中的元件：这时 WASD 转的是整批，右键删的是指针下那一个
+  if (hasSelectedElement()) return "WASD旋转；右键删除";
+  // 进了选中工具但手上还空着
+  if (selectToolActive()) return "拖动框选；shift追加";
+  // 指针不在画布上：位置相关的操作都不作数，按默认处理
+  if (!pointerInside) return "";
+  // 指针停在某个元件上：光源能开关，别的元件只能右键删
+  const hovered = findElementAtPointer();
+  if (hovered !== null && !hovered.deleting) {
+    return hovered.typeId === "light" ? "点击开启/关闭；右键删除" : "WASD旋转；右键删除";
+  }
+  // 手上拿着元件，正在挑格子放；拿的是光源时多一条开关说明
+  // WASD旋转放在缩放之后、开关之前：两条提示里它都紧跟着滚轮缩放，位置固定，读起来不会跳
+  const typeId = selectedTypeId();
+  if (typeId === "light") return "左键放置；数字键/ ` 键选择；中键拖动视野；滚轮缩放；WASD旋转；点击开启/关闭";
+  if (typeId !== null) return "左键放置；数字键/ ` 键选择；中键拖动视野；滚轮缩放；WASD旋转";
+  return "";  // 默认：无提示
+}
+
+// 把提示文字画在底部栏里：单行、垂直居中、左对齐
+// 左内缩取与上方第一个元件槽相同的值，上下两栏的左边缘落在同一条竖线上
+// 用 save/restore 包住，字体与对齐方式不会漏到后面的绘制里去
+function drawBottomBarHint(vp) {
+  const text = hintText();
+  if (text === "") return;  // 默认状态没有提示，栏里就空着
+  const h = CONFIG.bottomBarHeight;
+  const y = state.cssH - CONFIG.panelGap - h;
+  const x = vp.x + 2 + CONFIG.panelSlotPad;
+  ctx.save();
+  ctx.font = CONFIG.hintFontSize + "px " + UI_FONT;
+  ctx.fillStyle = COLOR.hintText;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  // 窗口太窄时提示会比栏还宽：宁可不显示，也不要让它压到描边上、甚至溢出到栏外
+  if (ctx.measureText(text).width > vp.x + vp.w - 16 - x) { ctx.restore(); return; }
+  ctx.fillText(text, x, y + h / 2);
+  ctx.restore();
+}
+
+// 第 i 个选项槽的矩形：绘制与鼠标命中判定共用这一个函数，保证「看到的框」和「判定区」永远一致
+// 槽恒为正方形，边长取固定常量而不是面板高度：面板以后调整高度，槽的尺寸不会跟着变
+function panelSlotRect(i, vp) {
+  const pad = CONFIG.panelSlotPad;
+  const side = CONFIG.panelSlotSide;
+  return {
+    x: vp.x + 2 + pad + i * (side + CONFIG.panelSlotGap),  // 从面板左内侧起横向排开
+    y: CONFIG.panelGap + 2 + pad,
+    w: side,
+    h: side
+  };
+}
+
+// 设置入口槽的矩形：与元件槽同尺寸、同一行的 y，但贴在面板右内侧，序号排在元件槽之后
+// 右内缩用和左边同一个 pad：左右留白对称，槽不会贴到面板边框上，以后加元件也挤不走它
+function settingsSlotRect(vp) {
+  const pad = CONFIG.panelSlotPad;
+  const side = CONFIG.panelSlotSide;
+  return {
+    x: vp.x + vp.w - 2 - pad - side,
+    y: CONFIG.panelGap + 2 + pad,
+    w: side,
+    h: side
+  };
+}
+
+// 文件入口槽的矩形：尺寸与 y 直接沿用设置入口，只把横坐标往左挪一格加一个间隔
+// 这样两个按钮永远同高同宽、间距等于元件槽之间的间隔，面板宽度变了也不会错位
+function fileSlotRect(vp) {
+  const sr = settingsSlotRect(vp);
+  return {
+    x: sr.x - CONFIG.panelSlotSide - CONFIG.panelSlotGap,
+    y: sr.y,
+    w: sr.w,
+    h: sr.h
+  };
+}
+
+// 教程入口槽的矩形：尺寸与 y 沿用文件入口，横坐标再往左挪一格加一个间隔
+// 三个按钮永远同高同宽、间距等于元件槽之间的间隔，面板宽度变了也不会错位
+function tutorialSlotRect(vp) {
+  const fr = fileSlotRect(vp);
+  return {
+    x: fr.x - CONFIG.panelSlotSide - CONFIG.panelSlotGap,
+    y: fr.y,
+    w: fr.w,
+    h: fr.h
+  };
+}
+
+// 齿轮轮廓的点列：每个齿依次走「齿根左→齿顶左→齿顶右→齿根右」，角度单调递增所以不会自交
+// 齿根半角大于齿顶半角，齿才呈上窄下宽的梯形；半径用世界单位，画时整体乘缩放，大小自动与元件对齐
+function gearPoints() {
+  const n = CONFIG.gearTeeth;
+  const step = Math.PI * 2 / n;                         // 每个齿占的圆心角
+  const tip = CONFIG.gearTipHalfDeg * Math.PI / 180;    // 齿顶半角：决定齿顶那条边的宽度
+  const root = CONFIG.gearRootHalfDeg * Math.PI / 180;  // 齿根半角：比齿顶大，差值就是齿的锥度
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = i * step;  // 第 i 个齿的中心角
+    pts.push([Math.cos(a - root) * CONFIG.gearRootR, Math.sin(a - root) * CONFIG.gearRootR]);
+    pts.push([Math.cos(a - tip) * CONFIG.gearTipR, Math.sin(a - tip) * CONFIG.gearTipR]);
+    pts.push([Math.cos(a + tip) * CONFIG.gearTipR, Math.sin(a + tip) * CONFIG.gearTipR]);
+    pts.push([Math.cos(a + root) * CONFIG.gearRootR, Math.sin(a + root) * CONFIG.gearRootR]);
+  }
+  return pts;
+}
+
+// 文件图标的轮廓：一张右上角折起的纸，外框圆角用 arcTo 磨圆，与齿轮的圆角风格一致
+// 路径按顺时针走一圈：左上→左下→右下→右边上行到折角→折角斜边→回到左上
+function traceFilePath() {
+  const hw = CONFIG.fileHalfW;
+  const hh = CONFIG.fileHalfH;
+  const r = CONFIG.fileCornerR;
+  const f = CONFIG.fileFoldLen;
+  ctx.beginPath();
+  ctx.moveTo(-hw + r, -hh);                        // 从顶边靠左的位置起笔
+  ctx.arcTo(-hw, -hh, -hw, -hh + r, r);            // 左上圆角
+  ctx.lineTo(-hw, hh - r);
+  ctx.arcTo(-hw, hh, -hw + r, hh, r);              // 左下圆角
+  ctx.lineTo(hw - r, hh);
+  ctx.arcTo(hw, hh, hw, hh - r, r);                // 右下圆角
+  ctx.lineTo(hw, -hh + f);                         // 右边上行，停在折角开始处
+  ctx.lineTo(hw - f, -hh);                         // 折角的斜边
+  ctx.lineTo(-hw + r, -hh);
+  ctx.closePath();
+}
+
+// 在槽内画文件图标：坐标与齿轮同一套世界单位，所以两者大小、粗细天然一致
+// 先描折角再描外框，最后统一填充，避免填充把折角线盖掉
+function drawFileIcon(r) {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const k = CONFIG.panelSlotElementLen / CONFIG.elementLen;  // 与元件槽同一个缩放系数
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(k, k);
+  ctx.strokeStyle = hslCss(settingsHSL.gearStroke);
+  ctx.lineWidth = CONFIG.fileStroke;
+  ctx.lineJoin = "round";  // 折角与圆角都用圆角连接，和元件的圆角风格一致
+  traceFilePath();
+  ctx.fillStyle = hslCss(settingsHSL.gearFill);
+  ctx.fill();
+  ctx.stroke();
+  // 折角的小翻边：单独描一个 L 形，纸面看起来才是折过来的，而不是缺了一个角
+  const hw = CONFIG.fileHalfW;
+  const hh = CONFIG.fileHalfH;
+  const f = CONFIG.fileFoldLen;
+  ctx.beginPath();
+  ctx.moveTo(hw - f, -hh);
+  ctx.lineTo(hw - f, -hh + f);
+  ctx.lineTo(hw, -hh + f);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// 在槽内画「教程」图标：外圈与问号的基础几何取自 Lucide / Feather 图标库的 help-circle，问号按本项目的习惯微调过
+// 原图是 24×24 网格：外圈是半径 10 的圆、描边 2、圆头圆角；问号在原图基础上把钩上移、补一笔竖、点下移，细节见下方注释
+// 换算：先把原图坐标整体减 12 把原点挪到圆心，再乘比例缩到槽内，所以改外缘半径时整幅图标等比缩放
+// 圆面填实成与齿轮、文件图标同一支蓝，边框只当一圈细轮廓；问号取边框同色，与圆环呼应成一体
+function drawTutorialIcon(r) {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const k = CONFIG.panelSlotElementLen / CONFIG.elementLen;  // 与元件槽同一个缩放系数，图标大小天然对齐
+  const s = CONFIG.tutorialIconOuterR / 11;  // 原图外缘半径是圆半径 10 加半个描边 1，共 11
+  const gx = (v) => (v - 12) * s;            // 原图横坐标 → 槽心坐标：先减半格挪原点，再等比缩小
+  const gy = (v) => (v - 12) * s;            // 纵坐标同一比例，两轴一致，图形不会被拉变形
+  const markCss = hslCss(settingsHSL.gearStroke);  // 问号颜色：与圆环边框同一支色，内外一个色系
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(k, k);
+  ctx.lineCap = "round";   // 原图就是圆头：问号的勾、尾巴和那个点都靠它收得圆润
+  ctx.lineJoin = "round";
+  // 外圈：原图 <circle cx=12 cy=12 r=10>，圆心正好落在槽心；圆面填实，描边单独用细一档的线宽
+  ctx.beginPath();
+  ctx.arc(0, 0, 10 * s, 0, Math.PI * 2);
+  ctx.fillStyle = hslCss(settingsHSL.gearFill);      // 圆面填色：取齿轮本体那支蓝，与齿轮、文件图标一致
+  ctx.strokeStyle = hslCss(settingsHSL.gearStroke);  // 边框描边：与齿轮描边同色，粗细另取一支更细的
+  ctx.lineWidth = CONFIG.tutorialRingStroke;
+  ctx.fill();
+  ctx.stroke();
+  // 问号主体：在原图路径 M9.09 9 a3 3 0 0 1 5.83 1 c0 2-3 3-3 3 上做了三处调整
+  // 一是钩整体上移 0.7 格，二是尾巴改成末端竖直，三是补了一笔短竖，最后把点往下挪 0.7 格
+  // 这样钩、尾、竖、点四段上下连贯：钩的末端与尾的起端切线都朝正下方，接缝处不会有折角
+  ctx.beginPath();
+  ctx.moveTo(gx(9.09), gy(8.30));
+  ctx.arc(gx(11.92), gy(9.30), 3 * s, -2.8033, 0.0015, false);  // 弧的扫角沿用原图，只把弧心整体上移
+  // 尾：从钩的右下端往下探、边下探边向左靠到中轴，末端切线正好竖直，与下面那笔竖无缝接上
+  ctx.bezierCurveTo(gx(14.90), gy(11.00), gx(12.00), gy(11.30), gx(12.00), gy(12.30));
+  // 竖：原图没有这一笔，是补的；短短一竖压在中轴上，问号才立得住，也才与这套元件的直线风格一致
+  ctx.lineTo(gx(12.00), gy(14.20));
+  ctx.strokeStyle = markCss;  // 问号用边框同色描出来，与外面那圈细边框呼应
+  ctx.lineWidth = 2 * s;      // 问号描边宽度：沿用原图的 2 同比缩小，比圆环略粗一档，缩小后仍看得清
+  ctx.stroke();
+  // 点：原图用一段零长度的线配圆头描边画成；Canvas 对零长度子路径不保证给圆头
+  // 所以直接填一个半径等于半个描边宽的圆，观感与原图一致，也更稳妥；位置比原图下移了 0.7 格
+  ctx.beginPath();
+  ctx.arc(gx(12), gy(17.70), s, 0, Math.PI * 2);
+  ctx.fillStyle = markCss;
+  ctx.fill();
+  ctx.restore();
+}
+
+// 「选中」指针箭头的轮廓点列（归一化坐标：x 向右、y 向下，左上角是笔尖）
+// 存归一化点列而不是直接写世界坐标：以后想调箭头形状只改这几个点，居中和缩放由绘制时算出来
+const SELECT_ICON_PTS = [
+  [0.08, 0.02],   // 笔尖
+  [0.08, 0.78],   // 左边缘向下到底
+  [0.28, 0.60],   // 往内收的缺口
+  [0.42, 0.95],   // 尾巴左下
+  [0.56, 0.88],   // 尾巴右下
+  [0.42, 0.55],   // 尾巴右上
+  [0.66, 0.55]    // 右侧倒钩
+];
+
+// 在槽里画「选中」图标：一个指针箭头，与其它图标共用同一套局部坐标（原点在槽心）
+// 点列先按包围盒居中、再按高度缩放，所以改形状不必重新算偏移，箭头永远落在槽心
+function drawSelectIcon(r) {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const k = CONFIG.panelSlotElementLen / CONFIG.elementLen;  // 与元件槽同一个缩放系数，图标大小天然对齐
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < SELECT_ICON_PTS.length; i++) {
+    const p = SELECT_ICON_PTS[i];
+    if (p[0] < minX) minX = p[0];
+    if (p[0] > maxX) maxX = p[0];
+    if (p[1] < minY) minY = p[1];
+    if (p[1] > maxY) maxY = p[1];
+  }
+  const s = CONFIG.selectIconH / (maxY - minY);  // 按高度定缩放，宽度随形状比例自动得出
+  const ox = (minX + maxX) / 2;
+  const oy = (minY + maxY) / 2;
+  ctx.save();
+  ctx.translate(cx + CONFIG.selectIconDX * k, cy);  // 右移量按同一个缩放系数换算成屏幕像素
+  ctx.scale(k, k);
+  ctx.fillStyle = hslCss(settingsHSL.gearFill);
+  ctx.strokeStyle = hslCss(settingsHSL.gearStroke);
+  ctx.lineWidth = CONFIG.selectIconStroke;
+  ctx.lineJoin = "round";   // 拐角磨圆，与齿轮、文件图标的圆角风格一致
+  ctx.beginPath();
+  for (let i = 0; i < SELECT_ICON_PTS.length; i++) {
+    const x = (SELECT_ICON_PTS[i][0] - ox) * s;
+    const y = (SELECT_ICON_PTS[i][1] - oy) * s;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.stroke();   // 先描边后填充：描边内侧那半被填充盖住、只留外面一圈，与元件画法一致
+  ctx.fill();
+  ctx.restore();
+}
+
+// 画一个按钮槽：文件与设置两个按钮共用，保证两者的底色、描边、缩放、悬停按下手感完全一致
+// 图标由调用方传入并在同一个缩放坐标系里绘制，所以图标必然跟着框一起缩，不会只缩框不缩图标
+function drawButtonSlot(r, animIndex, lit, drawIcon) {
+  const s = slotAnim[animIndex].cur;  // 按钮当前缩放比例：悬停略缩、按下更缩
+  ctx.save();
+  // 和元件槽一样绕槽心缩放：框和图标共用这套局部坐标
+  ctx.translate(r.x + r.w / 2, r.y + r.h / 2);
+  ctx.scale(s, s);
+  ctx.translate(-(r.x + r.w / 2), -(r.y + r.h / 2));
+  ctx.fillStyle = hslLit(settingsHSL.slotFill, lit);
+  ctx.lineWidth = 2 / s;  // 线宽除以缩放抵消影响，缩小时描边仍是 2px，不会跟着变细
+  ctx.beginPath();
+  ctx.roundRect(r.x, r.y, r.w, r.h, CONFIG.panelSlotRadius);
+  ctx.fill();
+  ctx.strokeStyle = hslLit(settingsHSL.slotStroke, lit);
+  ctx.stroke();
+  drawIcon(r);
+  ctx.restore();
+}
+
+// 在 Canvas 上描出齿轮的路径：外圈是齿轮点列，另起一条子路径补中心孔
+// 两条子路径配合 evenodd 填充，孔才是真的透出槽底色，而不是拿别的颜色盖一块圆上去
+function traceGearPath() {
+  const pts = gearPoints();
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  // 起点正好落在圆弧的起始角上，所以 moveTo 之后接 arc 不会多出一条连线
+  ctx.moveTo(CONFIG.gearHoleR, 0);
+  ctx.arc(0, 0, CONFIG.gearHoleR, 0, Math.PI * 2);
+}
+
+// 在槽里画设置图标：形状与元件共用同一套局部坐标（原点在中心），这里只是平移到槽心再整体缩放
+// 齿轮不参与提亮：亮起的只有底板，齿轮保持原色，两者对比更强，齿形反而比一起变白时更清楚
+// 先描边后填充：描边内侧那半被填充盖住、只留外面一圈，与元件的画法保持一致
+function drawSettingsIcon(r) {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const k = CONFIG.panelSlotElementLen / CONFIG.elementLen;  // 与元件槽同一个缩放系数，两者大小天然对齐
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(k, k);
+  ctx.fillStyle = hslCss(settingsHSL.gearFill);
+  ctx.strokeStyle = hslCss(settingsHSL.gearStroke);
+  ctx.lineWidth = CONFIG.gearStroke;  // 用世界单位，随 k 一起放大，视觉粗细与槽内元件协调
+  ctx.lineJoin = "round";             // 齿的尖角靠描边的圆角连接磨圆，与元件的圆角风格一致
+  traceGearPath();
+  ctx.stroke();
+  ctx.fill("evenodd");  // 必须显式给 evenodd：默认的 nonzero 会把中心孔一起填实，齿轮就成了实心饼
+  ctx.restore();
+}
+
+// 简介浮层的位置：紧贴面板矩形下边缘再留一点间隔，向下盖在网格上
+// 不占面板高度，所以面板维持原高度、网格区域也不被压缩
+function panelTipRect(vp) {
+  const pad = CONFIG.panelSlotPad;
+  return {
+    x: vp.x + 2 + pad,                              // 与槽一样从面板左内侧起
+    y: vp.y - CONFIG.panelGap + CONFIG.panelTipGap, // 面板矩形下边缘再往下一点
+    w: vp.w - 4 - pad * 2                           // 横跨面板内宽
+  };
+}
+
+// 在槽内画指定类型的元件：形状与网格上的元件同一套本地坐标（原点在元件中心、顶点朝 -y），这里只是平移到槽心再整体缩放
+function drawSlotElement(r, typeId) {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  // 缩放系数 = 槽内期望长度 / 元件的世界单位长度，形状比例因此和网格上的元件完全一致
+  const k = CONFIG.panelSlotElementLen / CONFIG.elementLen;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(k, k);
+  ctx.fillStyle = hslCss(elementHSL.fill);
+  ctx.strokeStyle = hslCss(elementHSL.stroke);
+  ctx.lineWidth = CONFIG.elementStroke;  // 描边宽度用世界单位，随 k 一起放大，视觉粗细与网格上的元件对齐
+  ctx.lineJoin = "round";                // 圆角靠描边的圆角连接实现，与 SVG 侧的 stroke-linejoin 一致
+  // 路径由类型点列生成：和 SVG 侧同一份形状定义，两套渲染不会各自漂移
+  traceElementPath(typeId);
+  // 先描边后填充：描边内侧那半被填充盖住、只留外面一圈，与 SVG 侧的 paint-order="stroke" 等价
+  ctx.stroke();
+  ctx.fill();
+  ctx.restore();
+}
+
+// 画面板里的一排选项槽：panelSlotCount 个正方形圆角槽，从面板左内侧起横向排开
+// 悬停的槽整体缩小，缩小靠「绕槽心缩放坐标系」实现，所以槽里的元件必然跟着一起缩
+function drawPanelSlots(vp) {
+  ctx.save();
+  for (let i = 0; i < CONFIG.panelSlotCount; i++) {
+    const r = panelSlotRect(i, vp);
+    const s = slotAnim[i] ? slotAnim[i].cur : 1;  // 该槽当前缩放比例，1 为原尺寸
+    const selected = (i === slotSelectedIndex);   // 选中的槽：填充与描边都提亮、描边更粗
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    ctx.save();
+    // 槽填充硬编码取常量，与调试面板的 HSL 滑块解绑：滑块只当取色沙盒，不影响实际渲染
+    ctx.fillStyle = selected ? COLOR.slotFillSelected : COLOR.slotFill;
+    // 把坐标系绕槽心缩一下再画：槽和元件共用这套局部坐标，元件自动跟随方框，不会只缩框不缩元件
+    ctx.translate(cx, cy);
+    ctx.scale(s, s);
+    ctx.translate(-cx, -cy);
+    // 线宽除以 s 抵消缩放对描边的影响，缩小时描边仍是设定宽度，不会跟着变细
+    ctx.lineWidth = (selected ? CONFIG.slotSelectedBorderWidth : 2) / s;
+    ctx.beginPath();
+    // roundRect 是标准的 Canvas 2D 方法，第 5 个参数直接给圆角半径
+    ctx.roundRect(r.x, r.y, r.w, r.h, CONFIG.panelSlotRadius);
+    ctx.fill();
+    // 描边：选中的槽略粗且略微提亮，未选中用本色；按下不改色，所以按下不会闪
+    ctx.strokeStyle = selected ? COLOR.slotBorderSelected : COLOR.slotBorder;
+    ctx.stroke();
+    // 选中槽画指针箭头，元件槽画对应元件，其余空槽保持纯色方块
+    if (i === SELECT_SLOT_INDEX) drawSelectIcon(r);
+    else if (isElementSlot(i)) drawSlotElement(r, PANEL_SLOT_TYPES[i - ELEMENT_SLOT_BASE]);
+    ctx.restore();
+  }
+  // 文件入口：贴在设置入口左边一格，提亮规则与设置入口完全一致，只是各用各的进度标量
+  const fileLit = fileLitAnim.cur * CONFIG.settingsLitAmount;  // 文件弹窗打开时的提亮幅度：与设置同一档，两个按钮亮起来才不会一深一浅
+  drawButtonSlot(fileSlotRect(vp), FILE_SLOT_INDEX, fileLit, drawFileIcon);
+  // 教程入口：再贴在文件入口左边一格，同样各用各的进度标量，三个按钮的亮灭深浅一致
+  const tutorialLit = tutorialLitAnim.cur * CONFIG.settingsLitAmount;  // 教程按钮打开时的提亮幅度：与另外两个同一档
+  drawButtonSlot(tutorialSlotRect(vp), TUTORIAL_SLOT_INDEX, tutorialLit, drawTutorialIcon);
+  // 设置入口：排在左边那排之后、单独贴右边画，所以以后往面板里加元件也不会把它挤走
+  const lit = settingsLitAnim.cur * CONFIG.settingsLitAmount;  // 底板打开时的提亮幅度：按进度乘上配置的幅度
+  drawButtonSlot(settingsSlotRect(vp), SETTINGS_SLOT_INDEX, lit, drawSettingsIcon);
+}
+
+// 把简介浮层的外观一次性从 CONFIG / COLOR 注入到 DOM：字号、行高、内边距、圆角、颜色仍集中在配置里
+// 只做一次，不必每帧写样式；文本折行交给浏览器，不用再手动测量断行
+function initSlotTipDom() {
+  tipDom.style.padding = CONFIG.panelTipPadY + "px " + CONFIG.panelTipPadX + "px";
+  tipDom.style.borderRadius = CONFIG.panelTipRadius + "px";
+  tipDom.style.background = COLOR.tipFill;
+  tipDom.style.borderColor = COLOR.tipBorder;
+  tipDom.style.color = COLOR.tipDesc;
+  tipDomName.style.fontSize = CONFIG.panelTipNameSize + "px";
+  tipDomName.style.lineHeight = (CONFIG.panelTipNameSize + 5) + "px";  // 名称行高：字号再留一点行距，与说明行拉开层次
+  tipDomName.style.color = COLOR.tipName;
+  tipDomDesc.style.fontSize = CONFIG.panelTipDescSize + "px";
+  tipDomDesc.style.lineHeight = CONFIG.panelTipLineHeight + "px";
+}
+
+// 把简介浮层同步到 DOM：内容只在换槽时写一次，位置、宽度、透明度、位移每帧更新
+// 浮层是独立 DOM 层且 z-index 高于元件层，所以网格上有元件时也不会被盖住
+function renderSlotTip(vp) {
+  const p = tipAnim.cur;  // 显隐进度：0 全隐、1 全显
+  // 收起状态直接隐藏：连同已写入的槽序号一起清掉，下次显示一定重写内容
+  if (tipIndex < 0 || p <= 0.001) {
+    tipDomIndex = -1;
+    tipDom.style.display = "none";
+    return;
+  }
+  if (tipDom.style.display === "none") tipDom.style.display = "";
+  // 内容只在换槽时写：同一槽连续多帧不重复改 DOM
+  if (tipIndex !== tipDomIndex) {
+    tipDomIndex = tipIndex;
+    const type = ELEMENT_TYPES[PANEL_SLOT_TYPES[tipIndex - ELEMENT_SLOT_BASE]];
+    tipDomName.textContent = type.name;
+    tipDomDesc.textContent = type.desc;
+  }
+  const pos = panelTipRect(vp);
+  tipDom.style.left = pos.x + "px";
+  tipDom.style.top = pos.y + "px";
+  tipDom.style.width = pos.w + "px";
+  tipDom.style.opacity = p;
+  // 未显示时整体上移一段，随进度滑到位：像是从面板里推出来，而不是硬生生冒出来
+  tipDom.style.transform = "translateY(" + (-(1 - p) * CONFIG.panelTipRise) + "px)";
+}
+
+/* ========== 存档（序列化与反序列化） ========== */
+
+// 把一个元件转成一条存档记录：坐标由格心换算回整数格，朝向由目标角度换算
+// 序列化整份存档与序列化剪贴板共用它，两处的换算规则不会各写一份、慢慢跑偏
+function elementToRecord(el) {
+  return {
+    type: el.typeId,
+    gx: Math.round(el.wx - 0.5),  // 元件恒在格心，世界坐标必是半整数，换算成整数格索引无损且无浮点误差
+    gy: Math.round(el.wy - 0.5),
+    // 朝向取目标角度换算出来的离散值：旋转动画途中朝向索引还没同步，直接读它会存到转过之前的旧方向
+    dir: ((Math.round(el.angleTarget / 90) % 4) + 4) % 4,
+    on: el.on
+  };
+}
+
+// 序列化：把当前电路与视野转成纯数据对象，不碰画面也不碰文件，因此可以单独验证
+// 只导出电路与视野两类；界面设置与配色属于工作环境偏好，不进存档
+function serializeScene() {
+  const list = [];
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.deleting) continue;  // 正在播放消失动画的元件不算数，存下来会凭空多出一个
+    list.push(elementToRecord(el));
+  }
+  return {
+    format: "laser-gate",   // 格式标记：读档时用来挡住误把别的 JSON 当存档读的情况
+    version: 1,             // 结构版本：以后改结构时递增，读档按它决定怎么解释
+    view: {
+      worldX: state.anchorWX,   // 参考点的世界坐标
+      worldY: state.anchorWY,
+      screenX: state.anchorSX,  // 同一个参考点落在屏幕上的位置，与缩放一起唯一确定当前视野
+      screenY: state.anchorSY,
+      scale: state.scale
+    },
+    elements: list
+  };
+}
+
+// 当前程序认识的元件类型标识：校验存档时用它判断某条元件还能不能认出来
+// 直接从元件类型表取键，以后加元件类型不必改这里
+const KNOWN_ELEMENT_TYPES = Object.keys(ELEMENT_TYPES);
+
+// 判断一个值是不是可用的有限数字：存档来自外部文件，字符串和 NaN 都不能放行
+function isFiniteNumber(v) {
+  return typeof v === "number" && isFinite(v);
+}
+
+// 反序列化：校验一份存档数据，逐条筛出能用的元件，并先判断整份文件能不能用
+// 只做判断与换算，不碰画面也不读文件；返回 { ok, reason, view, elements, skipped }
+//   ok       整份文件能不能用，false 时 reason 说明原因，此时元件列表为空
+//   view     视野，缺失或取值不合法时为 null，交给后面应用的那一步退回默认视野
+//   elements 校验通过的元件，字段已换算成程序内部用的形式
+//   skipped  被跳过的条目与原因，用来告诉用户一共跳了几条
+function parseScene(raw) {
+  // 整份文件不可用的几种情况统一从这里返回，免得每个分支各写一遍
+  const reject = function (reason) {
+    return { ok: false, reason: reason, view: null, elements: [], skipped: [] };
+  };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return reject("不是本程序的存档");
+  if (raw.format !== "laser-gate") return reject("不是本程序的存档");
+  if (raw.version !== 1) return reject("版本不认识");
+  if (!Array.isArray(raw.elements)) return reject("不是本程序的存档");
+
+  const list = [];
+  const skipped = [];
+  for (let i = 0; i < raw.elements.length; i++) {
+    const e = raw.elements[i];
+    if (e === null || typeof e !== "object" || Array.isArray(e)) { skipped.push({ reason: "条目不是对象", raw: e }); continue; }
+    if (KNOWN_ELEMENT_TYPES.indexOf(e.type) < 0) { skipped.push({ reason: "元件类型不认识", raw: e }); continue; }
+    // 坐标必须是整数：元件恒在格心，非整数说明这份数据不是本程序写的，放进去会落在格子中间
+    if (!Number.isInteger(e.gx) || !Number.isInteger(e.gy)) { skipped.push({ reason: "坐标不是整数", raw: e }); continue; }
+    // 朝向必须是 0~3：超范围的朝向会让发射方向掩码算出一个不存在的边，模拟会整个错乱
+    if (!Number.isInteger(e.dir) || e.dir < 0 || e.dir > 3) { skipped.push({ reason: "朝向不合法", raw: e }); continue; }
+    list.push({
+      typeId: e.type,
+      wx: e.gx + 0.5,     // 格索引换算回格心世界坐标，与序列化那一步互为逆运算
+      wy: e.gy + 0.5,
+      dir: e.dir,
+      on: e.on === true   // 缺省当关：这个字段只有光源用得上，缺失不该让整条元件作废
+    });
+  }
+
+  // 视野五项必须都是有限数，缩放还必须是正数：有一项不对就整体退回默认视野，不让坏数据把画面推到看不见的地方
+  let view = null;
+  const v = raw.view;
+  if (v !== null && typeof v === "object" && !Array.isArray(v) &&
+      isFiniteNumber(v.worldX) && isFiniteNumber(v.worldY) &&
+      isFiniteNumber(v.screenX) && isFiniteNumber(v.screenY) &&
+      isFiniteNumber(v.scale) && v.scale > 0) {
+    view = { worldX: v.worldX, worldY: v.worldY, screenX: v.screenX, screenY: v.screenY, scale: v.scale };
+  }
+  return { ok: true, reason: "", view: view, elements: list, skipped: skipped };
+}
+
+// 清空画布上所有元件并复位模拟状态：读档前必须走一遍，否则旧电路会和读进来的叠在一起
+// 只清电路与推演状态，不动指针、槽位、弹窗这些界面状态——那些属于交互，不属于这一局
+function clearScene() {
+  for (let i = 0; i < elements.length; i++) elemLayer.removeChild(elements[i].node);
+  elements.length = 0;
+  recvMask = [];          // 接收掩码是按元件下标存的，元件没了它必须跟着清空，否则下标会串到新元件上
+  laserSegments = [];     // 上一帧的激光场一并清掉，不然读档那一瞬间会闪出一片属于旧电路的激光
+  lastEmit = null;        // 发射记录作废，让下一微帧从头重新推演
+  microframe = 0;         // 微帧计数归零，新电路从第 0 帧重新开始
+  microAcc = 0;           // 累加余数清零，免得带着旧电路攒下的零头多算一个微帧
+  rayGraph.dirty = true;  // 阻挡图整体作废：放在最后做，避免在元件数组半替换的中途被触发重建
+}
+
+// 把校验过的存档应用到画面：先清空旧电路，再按存档重建元件，最后把视野设过去
+// 传进来的是校验层的输出，数据已确认可用，这里不再重复判断
+function applyScene(parsed) {
+  clearScene();
+  for (let i = 0; i < parsed.elements.length; i++) {
+    const e = parsed.elements[i];
+    const el = placeElement(e.wx, e.wy, e.dir, e.typeId);
+    el.on = e.on;   // 放置时一律按关建立，这里还原存档里记下的光源开关
+  }
+  // 视野：当前值和目标值一起设。只设目标值的话，相机会从旧位置慢慢飘过去，而不是立刻到位
+  if (parsed.view !== null) {
+    state.anchorWX = parsed.view.worldX;
+    state.anchorWY = parsed.view.worldY;
+    state.anchorSX = parsed.view.screenX;
+    state.anchorSY = parsed.view.screenY;
+    state.tAnchorSX = parsed.view.screenX;
+    state.tAnchorSY = parsed.view.screenY;
+    state.scale = parsed.view.scale;
+    state.logScale = Math.log(parsed.view.scale);   // 缩放按对数插值，两个表示必须同时设，否则相机会自己动一下
+    state.tLogScale = state.logScale;
+  }
+  resetHistory();  // 换文档不是编辑动作：上一条电路的历史留着只会撤出莫名其妙的画面，直接清空
+  sceneDirty = true;
+}
+
+/* ========== 弹出面板（设置 / 文件） ========== */
+
+// 弹窗位置：右边缘与所锚定按钮槽的右内沿对齐，顶边贴在上方面板矩形下边缘之下
+// 传哪个按钮的矩形就挂在哪个按钮正下方，两个弹窗共用这一条定位规则，宽度也保持一致
+function popupPanelRect(vp, anchorRect) {
+  return {
+    x: anchorRect.x + anchorRect.w - CONFIG.settingsPanelWidth,
+    y: vp.y - CONFIG.panelGap + CONFIG.settingsPanelGap,
+    w: CONFIG.settingsPanelWidth
+  };
+}
+
+// 把弹窗的通用外观一次性从 CONFIG / COLOR 注入到 DOM：与简介浮层同一套做法，样式不必每帧重写
+// 两个弹窗都走它，底板色、圆角、内边距、字号因此天然一致，改一处两边同时生效
+function initPopupDom(dom) {
+  dom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
+  dom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
+  dom.style.background = COLOR.tipFill;      // 与简介浮层同色：都是浮在网格上的浅蓝底板
+  dom.style.borderColor = COLOR.tipBorder;   // 与面板、视口边框同色，整页仍是同一套外框
+  dom.style.color = COLOR.tipDesc;
+  dom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
+  // 行高逐行写死：以后往行里塞控件时高度不会因内容变化而抖
+  const rows = dom.children;
+  for (let i = 0; i < rows.length; i++) rows[i].style.height = CONFIG.settingsPanelRowH + "px";
+}
+
+// 初始化设置弹窗：注入通用外观，再单独接上它自己的三个控件
+function initSettingsPanelDom() {
+  initPopupDom(settingsPanelDom);
+  // 面板里的控件只在这一处绑定：init 只跑一次，监听器不会重复注册
+  gridSwitchDom.addEventListener("click", toggleGridRender);
+  advSwitchDom.addEventListener("click", toggleAdvancedRender);
+  speedSliderDom.addEventListener("input", onSpeedSliderInput);
+  // 滑块的范围与初始位置都由配置推出来：HTML 里不写死刻度，改配置就能整体挪动
+  speedSliderDom.min = "0";
+  speedSliderDom.max = String(CONFIG.speedSliderSteps);
+  speedSliderDom.step = "1";
+  speedSliderDom.value = String(dtToSpeedSlider(CONFIG.microframeDt));
+  microDt = speedSliderToDt(Number(speedSliderDom.value));  // 以滑块为准反推一次，保证首帧速度与显示位置严格一致
+  updateSpeedValueLabel();                                  // 首帧也把数值写出来，不然打开设置面板时数字是空白的
+}
+
+// 初始化文件弹窗：注入通用外观，接上三个按钮，并把本地文件读写能力的检测结果写进那一行
+// 以后往文件弹窗里加控件，绑定也写在这一处，init 只跑一次，监听器不会重复注册
+function initFilePanelDom() {
+  initPopupDom(filePanelDom);
+  btnOpenDom.addEventListener("click", onOpenFile);
+  btnSaveDom.addEventListener("click", onSaveFile);
+  btnSaveAsDom.addEventListener("click", onSaveFileAs);
+  btnImportSelDom.addEventListener("click", onImportSelection);
+  btnExportSelDom.addEventListener("click", onExportSelection);
+  // 按下按钮时不让它抢走焦点：按钮一旦留着焦点，之后再按回车会被浏览器当成又点了一次，
+  // 而画布要靠焦点才能响应键盘，焦点不该被按钮占着。拦掉按下时的默认行为即可，点击照常触发
+  filePanelDom.addEventListener("mousedown", function (e) {
+    if (e.target.classList.contains("btn")) e.preventDefault();
+  });
+  refreshFileName();
+}
+
+// 教程正文：这里按最终版面写成带层级的 HTML（导语 / 过渡句 / 编号步骤 / 关键词 / 结尾），不再是一整段纯文本
+// 用模板字符串整段保存而不是塞进 HTML 标签，是为了让文字与它的排版样式待在同一处，改文案不必翻回标签里
+// 这段文案由使用者本人撰写，这里只做分档排版与关键词强调、一个字不增不减；正文里的「底栏提示」指随状态变化的 hintText
+const TUTORIAL_TEXT = `
+<p class="tut-lead">你好！这是一个你可以随意探索的世界。激光是这里永恒的主题。它可以在元件之间传递，创造出各种各样激动人心的机器，或者任何你想做的东西。</p>
+<p class="tut-hint">如果你不知道该干什么，就往下看：</p>
+<ol class="tut-steps">
+<li class="tut-step"><span class="tut-step-text">首先，我们可以创建一个万物之源：<b class="tut-key">光源</b>。选中它，在图上点击放置，再点击它，就可以让它发出激光。</span></li>
+<li class="tut-step"><span class="tut-step-text">然后，你就可以遵循下面底栏的提示，<b class="tut-key">旋转</b>、<b class="tut-key">选中</b>元件，或者<b class="tut-key">调整视野</b>。</span></li>
+<li class="tut-step"><span class="tut-step-text">把鼠标<b class="tut-key">悬停</b>在元件上，就能看到它是做什么用的。</span></li>
+<li class="tut-step"><span class="tut-step-text">你可以把各种元件朝向不同方向放到激光的路径上，看看会发生什么。也不妨把<b class="tut-key">各种按钮</b>都试一试，它们有很多用处。</span></li>
+</ol>
+<p class="tut-end">祝你好运！</p>`;
+
+// 初始化教程弹窗：注入与设置、文件两个弹窗同款的底板外观，再摆好尺寸、接上取消按钮
+// 它不锚在按钮下方而是浮在屏幕正中，定位交给 CSS 的居中规则，所以这里只写尺寸与外观
+function initTutorialPanelDom() {
+  tutorialPanelDom.style.width = CONFIG.tutorialPanelW + "px";
+  tutorialPanelDom.style.height = CONFIG.tutorialPanelH + "px";
+  tutorialPanelDom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
+  tutorialPanelDom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
+  tutorialPanelDom.style.background = COLOR.tipFill;      // 与另外两个弹窗同色：都是浮在网格上的浅蓝底板
+  tutorialPanelDom.style.borderColor = COLOR.tipBorder;   // 与面板、视口边框同色，整页仍是同一套外框
+  tutorialPanelDom.style.color = COLOR.tipDesc;
+  tutorialPanelDom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
+  // 内容区的取色不走 CSS：色值统一从 COLOR 取，同一个蓝不在样式表和脚本里各写一份，免得日后改一处漏一处
+  // 底色特意取「未选中」那一档的蓝（slotFill，比窗口底板深一级）：本项目里白色代表选中，
+  // 铺白底会把整块内容区误读成选中态；压暗一级反而正好读成凹进去的一块阅读区
+  tutorialDocDom.style.background = COLOR.slotFill;
+  tutorialDocDom.style.color = COLOR.tipDesc;  // 说明文字色，压在深一级的蓝上仍读得清
+  // 把教程正文自己的那套排版样式也装上：导语、过渡句、编号步骤、关键词药丸、结尾各有一档
+  initTutorialDocStyle();
+  // 把教程正文填进内容区：正文现在是有层级的 HTML，所以走 innerHTML；内容是本文件里的常量，不含任何外部输入
+  // 只在这里赋值一次，之后开关窗口都沿用这份内容，不必每次重开都重写
+  tutorialDocDom.innerHTML = TUTORIAL_TEXT;
+  // 左上角那个叉形关闭按钮只在这一处绑定：init 只跑一次，监听器不会重复注册
+  btnTutorialCancelDom.addEventListener("click", function () {
+    tutorialOpen = false;  // 关掉教程窗口；内容不清空，下次再打开还是原来那份教程
+  });
+  // 按下按钮时不让它抢走焦点：与文件弹窗同样的处理，按钮只负责关窗，不需要长期持有焦点圈
+  // 叉是画在按钮里的 SVG，但它的指针事件已经在样式里关掉了，所以这里拿到的 target 一定是按钮本身
+  tutorialPanelDom.addEventListener("mousedown", function (e) {
+    if (e.target.classList.contains("btn")) e.preventDefault();
+  });
+}
+
+// 注入教程正文的排版样式：字号一律用 em，跟着弹窗字号一起缩放；颜色全部从 COLOR 取，避免同一个蓝在样式表里再写一份
+// 序号圆标用深蓝底配浅蓝字（tipName / tipFill），关键词药丸反过来（tipFill / tipName）：
+// 本项目里白色代表选中，这两处都不碰白色，读到什么颜色都不会被误认成选中态
+function initTutorialDocStyle() {
+  const css =
+    '.popup.modal .doc .tut-lead { margin: 0 0 6px; font-size: 1.05em; font-weight: 600; color: ' + COLOR.tipName + '; }' +
+    '.popup.modal .doc .tut-hint { margin: 0 0 12px; font-size: 0.92em; opacity: 0.8; }' +
+    '.popup.modal .doc .tut-steps { margin: 0; padding: 0; list-style: none; counter-reset: tut; }' +
+    '.popup.modal .doc .tut-step { position: relative; margin: 0 0 10px; padding-left: 30px; }' +
+    '.popup.modal .doc .tut-step:last-child { margin-bottom: 0; }' +
+    '.popup.modal .doc .tut-step::before { content: counter(tut); counter-increment: tut;' +
+    ' position: absolute; left: 0; top: 1px; width: 20px; height: 20px; line-height: 20px;' +
+    ' border-radius: 50%; text-align: center; font-size: 12px; font-weight: 700;' +
+    ' color: ' + COLOR.tipFill + '; background: ' + COLOR.tipName + '; }' +
+    '.popup.modal .doc .tut-key { padding: 0 4px; border-radius: 4px; font-weight: 700;' +
+    ' color: ' + COLOR.tipName + '; background: ' + COLOR.tipFill + '; }' +
+    '.popup.modal .doc .tut-end { margin: 14px 0 2px; text-align: center; font-size: 1.05em;' +
+    ' font-weight: 700; letter-spacing: 2px; color: ' + COLOR.tipName + '; }';
+  const styleDom = document.createElement("style");
+  styleDom.textContent = css;
+  document.head.appendChild(styleDom);
+}
+
+// 把当前文件名写进弹窗：还没存过时用占位名，后缀始终带着，让人知道存出来会叫什么
+function refreshFileName() {
+  fileNameDom.textContent = currentFileName || ("未命名" + SAVE_EXT);
+}
+
+// 打开（或首次建立）句柄库；不支持 IndexedDB 时静默返回 null，记忆功能降级为「不记忆」，不影响正常存取
+function openHandleDB() {
+  return new Promise(function (resolve) {
+    let req;
+    try { req = indexedDB.open(FS_DB_NAME, 1); } catch (err) { resolve(null); return; }
+    req.onupgradeneeded = function () { req.result.createObjectStore(FS_STORE_NAME); };
+    req.onsuccess = function () { resolve(req.result); };
+    req.onerror = function () { resolve(null); };
+  });
+}
+
+// 把这次用过的文件句柄记下来：同时更新内存，本次会话马上生效；再写进库，跨会话也能读回
+// 句柄是可序列化的，能直接存进 IndexedDB；写库失败只影响下次的起始目录，不影响本次存取，所以静默吞掉
+function rememberPickerHandle(handle) {
+  lastPickerHandle = handle;
+  openHandleDB().then(function (db) {
+    if (db === null) return;
+    db.transaction(FS_STORE_NAME, "readwrite").objectStore(FS_STORE_NAME).put(handle, FS_HANDLE_KEY);
+  }).catch(function () {});
+}
+
+// 启动时把上次的句柄读回内存：之后选择器要用时直接读内存，不必在点击那一刻再去等异步，用户手势不会被打断
+function loadPickerHandle() {
+  openHandleDB().then(function (db) {
+    if (db === null) return null;
+    return new Promise(function (resolve) {
+      const req = db.transaction(FS_STORE_NAME, "readonly").objectStore(FS_STORE_NAME).get(FS_HANDLE_KEY);
+      req.onsuccess = function () { resolve(req.result || null); };
+      req.onerror = function () { resolve(null); };
+    });
+  }).then(function (h) { lastPickerHandle = h || null; }).catch(function () {});
+}
+
+// 选择器选项里的起始目录：有记住的句柄就带上，框会从那个文件所在的目录打开；没有就不带，交给浏览器默认
+// startIn 接受文件句柄，落在它所在的那个目录，所以不必额外去取父目录句柄
+function startInOption() {
+  return lastPickerHandle === null ? {} : { startIn: lastPickerHandle };
+}
+
+// 打开：选一个存档读进画面
+// 顺序是「先全部读完并校验通过，再动画面」：任何一步失败都原样返回，正在编的电路不会被毁掉
+async function onOpenFile() {
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); return; }
+  let handle;
+  try {
+    const handles = await window.showOpenFilePicker(Object.assign({ multiple: false, types: SAVE_FILE_TYPES }, startInOption()));
+    handle = handles[0];   // 只允许选一个，返回的数组里必定有且只有一项
+  } catch (err) {
+    // 取消同样不是错误，静默收场
+    if (err.name !== "AbortError") console.log("[文件] 打开框出错：", err);
+    return;
+  }
+  rememberPickerHandle(handle);  // 记住这次所在的目录，下次打开框直接从这儿起步
+  let text;
+  try {
+    const file = await handle.getFile();
+    text = await file.text();
+  } catch (err) {
+    console.log("[文件] 读取失败：", err);
+    return;
+  }
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    console.log("[文件] 不是本程序的存档：内容不是合法的 JSON");
+    return;
+  }
+  const parsed = parseScene(raw);
+  if (!parsed.ok) { console.log("[文件] " + parsed.reason); return; }   // 整份不可用就整个放弃，画面保持原样
+  applyScene(parsed);
+  // 确认用上了才改绑定：读失败时「当前文件」仍指向原来那个，不会显示成刚选的坏文件
+  currentFileHandle = handle;
+  currentFileName = handle.name;
+  refreshFileName();
+  console.log("[文件] 已打开 " + currentFileName +
+    (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
+}
+
+// 另存为：弹保存框挑一个新文件，把当前电路写进去，并把它记为当前文件
+async function onSaveFileAs() {
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); return; }
+  let handle;
+  try {
+    handle = await window.showSaveFilePicker(Object.assign({
+      suggestedName: currentFileName || ("未命名" + SAVE_EXT),
+      types: SAVE_FILE_TYPES
+    }, startInOption()));
+  } catch (err) {
+    // 用户按取消不是错误，静默收场；其它错误才报出来，免得一次取消就弹一堆提示
+    if (err.name !== "AbortError") console.log("[文件] 保存框出错：", err);
+    return;
+  }
+  rememberPickerHandle(handle);  // 记住这次所在的目录，下次保存框直接从这儿起步
+  // 名字和句柄一起记：两者说的都是「现在绑在哪个文件上」，要改就一起改，不能只改一个
+  currentFileHandle = handle;
+  currentFileName = handle.name;
+  refreshFileName();
+  if (await writeCurrentFile()) console.log("[文件] 已另存为 " + currentFileName);
+}
+
+// 保存：写回当前文件；还没绑定过文件就退化成另存为，让「保存」永远有结果，不必先去点另存为
+async function onSaveFile() {
+  if (currentFileHandle === null) { await onSaveFileAs(); return; }
+  if (await writeCurrentFile()) console.log("[文件] 已保存到 " + currentFileName);
+}
+
+// 把当前电路写进当前文件，成功返回 true
+// 写入期间改的是临时文件，关流那一下才真正替换原文件，所以中途出错不会把旧存档毁掉
+async function writeCurrentFile() {
+  try {
+    const stream = await currentFileHandle.createWritable();
+    await stream.write(JSON.stringify(serializeScene(), null, 2));  // 缩进两格：存档是给人看的，手工改也方便
+    await stream.close();
+    return true;
+  } catch (err) {
+    console.log("[文件] 写入失败：", err);
+    return false;
+  }
+}
+
+// 视野中心所在的格心：整批元件没有别的落点参考时，用它当目标
+function viewCenterCell() {
+  const vp = getViewport();
+  return {
+    cx: cellCenterX(screenToWorldX(vp.x + vp.w / 2)),
+    cy: cellCenterY(screenToWorldY(vp.y + vp.h / 2))
+  };
+}
+
+// 把一批「已校验的元件记录」作为悬空选区加进画面：整批保持相对位置，包围盒中心吸附到指定格心
+// 偏移取两个格心之差，必是整数格，所以元件之间的相对位置一格不差地保留下来
+// 「以选区导入」与「粘贴」共用它，两者的差别只在目标格心怎么定，落位、选中、置顶这些收尾完全一致
+// 返回实际加进画面的元件个数
+function addRecordsAsSelection(records, targetCX, targetCY) {
+  let minWx = Infinity, maxWx = -Infinity, minWy = Infinity, maxWy = -Infinity;
+  for (let i = 0; i < records.length; i++) {
+    const e = records[i];
+    if (e.wx < minWx) minWx = e.wx;
+    if (e.wx > maxWx) maxWx = e.wx;
+    if (e.wy < minWy) minWy = e.wy;
+    if (e.wy > maxWy) maxWy = e.wy;
+  }
+  const offX = targetCX - cellCenterX((minWx + maxWx) / 2);
+  const offY = targetCY - cellCenterY((minWy + maxWy) / 2);
+
+  // 逐个放进画面，先不管选中状态；光源开关按记录还原
+  const added = [];
+  for (let i = 0; i < records.length; i++) {
+    const e = records[i];
+    const el = placeElement(e.wx + offX, e.wy + offY, e.dir, e.typeId);
+    el.on = e.on;
+    added.push(el);
+  }
+  // 走选区总入口：这一批成为新的选中集合，原来那批选中在这里落地（落点上的普通元件照旧被顶掉）
+  // 复用总入口而不是自己挨个置选中，是为了让落位、置顶、朝向归零这些收尾行为和手动框选完全一致
+  applySelection(function (e) { return added.indexOf(e) >= 0; }, false);
+  // 切到选中工具：只有在这个工具下，画布上的拖动才是「整批搬走」
+  setSelectedSlot(SELECT_SLOT_INDEX);
+  return added.length;
+}
+
+// 以选区导入：选一个存档，把里面的元件作为一批悬空选区加进当前画面
+// 与「打开」的区别：不替换当前画面，也不改「当前文件」的绑定，只是往现有电路上再添一批元件
+// 落点规则：整批保持相对位置不变，把这一批的包围盒中心挪到当前视野中央
+async function onImportSelection() {
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); return; }
+  let handle;
+  try {
+    const handles = await window.showOpenFilePicker(Object.assign({ multiple: false, types: SAVE_FILE_TYPES }, startInOption()));
+    handle = handles[0];   // 只允许选一个，返回的数组里必定有且只有一项
+  } catch (err) {
+    // 取消同样不是错误，静默收场
+    if (err.name !== "AbortError") console.log("[文件] 导入框出错：", err);
+    return;
+  }
+  rememberPickerHandle(handle);  // 记住这次所在的目录，下次导入框直接从这儿起步
+  let text;
+  try {
+    const file = await handle.getFile();
+    text = await file.text();
+  } catch (err) {
+    console.log("[文件] 读取失败：", err);
+    return;
+  }
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    console.log("[文件] 不是本程序的存档：内容不是合法的 JSON");
+    return;
+  }
+  const parsed = parseScene(raw);
+  if (!parsed.ok) { console.log("[文件] " + parsed.reason); return; }   // 整份不可用就整个放弃
+  if (parsed.elements.length === 0) { console.log("[文件] " + handle.name + " 里没有可导入的元件"); return; }
+
+  const target = viewCenterCell();
+  const n = addRecordsAsSelection(parsed.elements, target.cx, target.cy);
+  console.log("[文件] 已从 " + handle.name + " 导入 " + n + " 个元件作为选区" +
+    (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
+}
+
+// 以选区导出：把当前选区单独存成一个存档文件，结构与整份存档一致，只是不含视野
+// 与「另存为」的区别：导出的是一份新文件，不替换画面、也不改「当前文件」的绑定，当前编辑的还是原来那个
+async function onExportSelection() {
+  const payload = serializeSelection();
+  if (payload.elements.length === 0) { console.log("[文件] 没有选区，没东西可导出"); return; }
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); return; }
+  let handle;
+  try {
+    // 默认名字跟着当前存档走，加个「-选区」后缀，连续导几个不同选区时不会互相覆盖
+    const base = currentFileName ? currentFileName.replace(/\.lccas$/i, "") : "未命名";
+    handle = await window.showSaveFilePicker(Object.assign({
+      suggestedName: base + "-选区" + SAVE_EXT,
+      types: SAVE_FILE_TYPES
+    }, startInOption()));
+  } catch (err) {
+    // 用户按取消不是错误，静默收场；其它错误才报出来，免得一次取消就弹一堆提示
+    if (err.name !== "AbortError") console.log("[文件] 保存框出错：", err);
+    return;
+  }
+  rememberPickerHandle(handle);  // 记住这次所在的目录，下次导出框直接从这儿起步
+  try {
+    const stream = await handle.createWritable();
+    await stream.write(JSON.stringify(payload, null, 2));  // 与整份存档同样缩进两格，导出的文件也是给人看的
+    await stream.close();
+    console.log("[文件] 已把 " + payload.elements.length + " 个元件导出到 " + handle.name);
+  } catch (err) {
+    console.log("[文件] 写入失败：", err);
+  }
+}
+
+/* ========== 剪贴板（复制选区 / 粘贴） ========== */
+
+// 序列化当前选区，作为剪贴板里的内容：结构与存档一致，只是不带视野——粘贴时落在哪由那时的指针决定
+// 与存档的差别只有一条：存档不收悬空的元件，而剪贴板要的恰恰就是这批悬空的元件
+function serializeSelection() {
+  const list = [];
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el.selected || el.deleting) continue;
+    list.push(elementToRecord(el));
+  }
+  return { format: "laser-gate", version: 1, elements: list };
+}
+
+// 复制选区到系统剪贴板：内容是一段纯文本 JSON，与存档同格式，所以粘进文本编辑器也能直接读
+// 写剪贴板要用系统的接口，用户按下的那一下就是「用户手势」，浏览器不会拦
+async function copySelection() {
+  const payload = serializeSelection();
+  if (payload.elements.length === 0) { console.log("[剪贴板] 没有选区，没东西可复制"); return; }
+  if (!canUseClipboard) { console.log("[剪贴板] 当前环境不支持写剪贴板"); return; }
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    console.log("[剪贴板] 已复制 " + payload.elements.length + " 个元件");
+  } catch (err) {
+    console.log("[剪贴板] 写入失败：", err);
+  }
+}
+
+// 粘贴：把剪贴板里的文本解析成元件记录，作为一批悬空选区加进画面
+// 必须走系统的粘贴事件，而不是去调「读剪贴板」的接口：那个接口要授权，在本地文件下不可靠；
+// 粘贴事件是浏览器主动把内容递过来，不需要任何授权
+// 剪贴板里不是本程序的内容就静默忽略，不去动画面
+function onPaste(e) {
+  const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+  if (!text) return;   // 剪贴板里没有文本：不认领，交给浏览器按默认处理
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    console.log("[剪贴板] 剪贴板里的内容不是本程序的元件，已忽略");
+    return;
+  }
+  const parsed = parseScene(raw);
+  if (!parsed.ok) { console.log("[剪贴板] " + parsed.reason + "，已忽略"); return; }
+  if (parsed.elements.length === 0) { console.log("[剪贴板] 剪贴板里没有可粘贴的元件"); return; }
+  e.preventDefault();   // 确认要用了才拦默认行为，用不上时留给浏览器自己处理
+  // 落点：指针在画布内就以指针所在格为中心，指针不在就退回视野中心
+  const target = pointerInside
+    ? { cx: cellCenterX(screenToWorldX(pointerSX)), cy: cellCenterY(screenToWorldY(pointerSY)) }
+    : viewCenterCell();
+  const n = addRecordsAsSelection(parsed.elements, target.cx, target.cy);
+  console.log("[剪贴板] 已粘贴 " + n + " 个元件" +
+    (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
+}
+
+// 滑块刻度 → 微帧时长（秒）：最左端单独表示「零延迟」，往右走指数曲线
+// 用指数而不是线性，是因为人对速度的感知本来就是倍率关系，线性映射会让慢速段挤成一团
+function speedSliderToDt(v) {
+  const t = v / CONFIG.speedSliderSteps;  // 归一化到 0~1
+  if (t <= 0) return 0;                   // 最左端：不设延迟
+  const k = CONFIG.speedDtMax / CONFIG.speedDtMin;
+  return CONFIG.speedDtMin * Math.pow(k, t);
+}
+
+// 微帧时长 → 滑块刻度：上面那条映射的反函数，用于把默认速度换算成滑块的初始位置
+function dtToSpeedSlider(dt) {
+  if (dt <= CONFIG.speedDtMin) return 0;
+  const k = CONFIG.speedDtMax / CONFIG.speedDtMin;
+  return Math.round(CONFIG.speedSliderSteps * Math.log(dt / CONFIG.speedDtMin) / Math.log(k));
+}
+
+// 拖动「运行速度」滑块：把刻度换算成微帧时长，并清掉累加余数
+// 余数是按旧时长攒下的，换了时长还留着就会多算或少算一个微帧，清零最干净
+function onSpeedSliderInput() {
+  microDt = speedSliderToDt(Number(speedSliderDom.value));
+  microAcc = 0;
+  updateSpeedValueLabel();
+  sceneDirty = true;
+}
+
+// 更新速度数值显示：零延迟单独写「极速」，其余一律用秒、固定两位小数，单位统一才好横向比较
+function updateSpeedValueLabel() {
+  speedValueDom.textContent = microDt <= 0 ? "极速" : microDt.toFixed(2) + "s";
+}
+
+// 翻转一个开关的外观，返回翻转后的状态：两个开关共用，开与关的样子只维护这一份
+function flipSwitch(el) {
+  const on = !el.classList.contains("on");
+  el.classList.toggle("on", on);
+  return on;
+}
+
+// 切换「渲染网格」：改状态、换开关外观、作废网格缓存并要求重绘
+// 缓存位图里存的是上一版的画面，不作废就会把带网格线的旧图继续贴出来，开关看着像失灵
+function toggleGridRender() {
+  gridRenderOn = flipSwitch(gridSwitchDom);
+  gridCacheKey = "";   // 指纹清空，下一帧必定按新状态重建位图
+  sceneDirty = true;
+}
+
+// 切换「高级渲染」：只改状态与开关外观；激光不在任何缓存里，标记重绘就能立刻看到变化
+function toggleAdvancedRender() {
+  advancedRenderOn = flipSwitch(advSwitchDom);
+  sceneDirty = true;
+}
+
+// 每帧同步一个弹窗：位置跟着视口走，显隐与透明度直接取它锚定按钮的提亮进度
+// 共用同一个进度标量，弹窗与按钮必然同步亮起、同步熄灭，不需要第二套动画状态
+function renderPopup(dom, anim, anchorRect, vp) {
+  const p = anim.cur;  // 0 全隐、1 全显，与按钮提亮同源
+  if (p <= 0.001) {
+    dom.style.display = "none";  // 收干净直接隐藏，不留下一个透明的空壳压住网格
+    return;
+  }
+  if (dom.style.display === "none") dom.style.display = "block";
+  const pos = popupPanelRect(vp, anchorRect);
+  dom.style.left = pos.x + "px";
+  dom.style.top = pos.y + "px";
+  dom.style.width = pos.w + "px";
+  dom.style.opacity = p;
+}
+
+// 每帧同步两个弹窗：各自锚定自己的按钮，互不影响；同时只开一个，所以不会出现两块底板叠在一起
+function renderPanels(vp) {
+  renderPopup(settingsPanelDom, settingsLitAnim, settingsSlotRect(vp), vp);
+  renderPopup(filePanelDom, fileLitAnim, fileSlotRect(vp), vp);
+}
+
+// 每帧同步教程弹窗：位置由 CSS 居中，这里只管进度驱动的显隐与透明度
+// 收干净就 display:none，不留一个透明的空壳压住网格，也顺带把它的指针拦截一起解掉
+function renderTutorialPanel() {
+  const p = tutorialModalAnim.cur;  // 0 全隐、1 全显，与教程按钮的提亮同源
+  if (p <= 0.001) {
+    tutorialPanelDom.style.display = "none";
+    return;
+  }
+  // 显示时用 flex 而不是 block：窗口内部要靠弹性布局把内容区撑满取消按钮之外的高度
+  // 这里比对的是 "flex" 而不是 "none"：内联样式没写过时读回来是空串，只认 "none" 会在首帧漏掉一次
+  if (tutorialPanelDom.style.display !== "flex") tutorialPanelDom.style.display = "flex";
+  tutorialPanelDom.style.opacity = p;
+}
+
+/* ========== 面板选项槽的交互 ========== */
+
+// 屏幕位置落在哪个槽上：返回槽序号，没命中返回 -1
+// 选中槽与元件槽都算命中，空槽不响应；两者共用同一套悬停与按下反馈，手感一致
+// 设置按钮也算一个槽，序号排在所有元件槽之后，所以它天然共用同一套悬停与按下逻辑，手感不会走样
+// 悬停与点击共用它，两处判定不会算歪
+function slotIndexAt(sx, sy) {
+  const vp = getViewport();
+  // 从选中槽一直扫到最后一个元件槽，中间不留空：这两类槽在面板上是连着的
+  for (let i = SELECT_SLOT_INDEX; i < ELEMENT_SLOT_BASE + PANEL_SLOT_TYPES.length; i++) {
+    const r = panelSlotRect(i, vp);
+    if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+  }
+  const sr = settingsSlotRect(vp);
+  if (sx >= sr.x && sx <= sr.x + sr.w && sy >= sr.y && sy <= sr.y + sr.h) return SETTINGS_SLOT_INDEX;
+  const fr = fileSlotRect(vp);
+  if (sx >= fr.x && sx <= fr.x + fr.w && sy >= fr.y && sy <= fr.y + fr.h) return FILE_SLOT_INDEX;
+  const tr = tutorialSlotRect(vp);
+  if (sx >= tr.x && sx <= tr.x + tr.w && sy >= tr.y && sy <= tr.y + tr.h) return TUTORIAL_SLOT_INDEX;
+  return -1;
+}
+
+// 按指针屏幕位置更新悬停槽
+function updateSlotHoverAt(sx, sy) {
+  const hit = slotIndexAt(sx, sy);
+  // 换了槽就重新计时：简介的延迟按「停在同一个槽上」的时长算，扫过一排槽不会触发
+  if (hit !== slotHoverIndex) slotHoverTime = 0;
+  slotHoverIndex = hit;
+  // 按住后把指针拖离该槽就退出按下态，和普通按钮一致，避免两个槽同时停在缩小状态
+  if (slotPressedIndex >= 0 && slotPressedIndex !== slotHoverIndex) slotPressedIndex = -1;
+}
+
+// 每帧推进简介浮层：先累计当前槽的停留时长，够久才把浮层切到这个槽并淡入，否则淡出
+function updateSlotTip(dt) {
+  // 简介只对元件槽有效：两个按钮也在槽序号里，但它们没有元件简介，得排除掉
+  const onElementSlot = isElementSlot(slotHoverIndex);
+  if (onElementSlot) {
+    slotHoverTime += dt;
+  } else {
+    slotHoverTime = 0;
+  }
+  const wantShow = onElementSlot && slotHoverTime >= CONFIG.panelTipDelay;
+  // 先把要显示的槽记下来，再推进动画：移开鼠标后浮层仍按 tipIndex 把淡出播完
+  if (wantShow) tipIndex = slotHoverIndex;
+  stepEased(tipAnim, wantShow ? 1 : 0, dt, CONFIG.panelTipAnimDuration, easeInOutCubic);
+  // 淡出收干净后清掉记录的槽，下次淡入不会先闪一下旧内容
+  if (tipAnim.cur <= 0.001 && !wantShow) tipIndex = -1;
+}
+
+// 推进每个槽的缩放缓动：目标每帧由「是否被悬停 / 是否被按下」现算，两种状态的任意组合都自动成立
+// 这样就不必在状态切换时手动起停动画，也不会漏掉「按下时移出」这类组合
+// 亮度不参与这里的动画：按下只改变缩放，变亮与否完全由「是否选中」决定，所以按下不会闪
+function updateSlotAnim(dt) {
+  // 设置按钮就在这个数组里，跟着一起走，所以它的悬停与按下反馈与元件槽逐帧同源，不会有半点差别
+  for (let i = 0; i < slotAnim.length; i++) {
+    // 按下的槽缩得比悬停更深
+    const targetScale = (i === slotPressedIndex) ? CONFIG.panelSlotPressedScale
+      : (i === slotHoverIndex ? CONFIG.panelSlotHoverScale : 1);
+    stepEased(slotAnim[i], targetScale, dt, CONFIG.panelSlotAnimDuration);
+  }
+  // 提亮不参与缩放那套：它是「弹窗开着」的状态显示，不是按下反馈，所以不看悬停与按下
+  stepEased(settingsLitAnim, settingsOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
+  stepEased(fileLitAnim, filePanelOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);  // 文件按钮走同一套时长，两个按钮亮灭的节奏才不会一个快一个慢
+  stepEased(tutorialLitAnim, tutorialOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);  // 教程按钮也走同一套时长，三个按钮亮灭的节奏一致
+  // 教程弹窗的淡入淡出与上面这支提亮同源同时长：按钮亮起来的同时窗口淡出来，不会一个先一个后
+  stepEased(tutorialModalAnim, tutorialOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
+}
+
+// 按当前槽数量重建槽动画状态：全部停在原尺寸、未悬停、未按下；重开或改槽数量后都要走一遍
+function resetSlots() {
+  slotAnim.length = 0;
+  // 多建三个给教程、文件和设置按钮：它们占最后三个下标，所以数组比元件槽多三个
+  for (let i = 0; i <= TUTORIAL_SLOT_INDEX; i++) {
+    slotAnim.push(newEased(1));
+  }
+  slotHoverIndex = -1;
+  slotPressedIndex = -1;
+  slotSelectedIndex = ELEMENT_SLOT_BASE + 1;  // 默认选中透射器那个槽，与初始虚影形状保持一致
+  // 提亮不在这里复位：它跟随的是设置开没开，属于界面状态而不是这一局的状态
+  // 简介浮层一并复位：停留计时归零、浮层收起、动画标量直接停在 0，避免重开时残留上一局的浮层
+  slotHoverTime = 0;
+  tipIndex = -1;
+  tipAnim.cur = 0;
+  tipAnim.from = 0;
+  tipAnim.to = 0;
+  tipAnim.t = 1;
+}
+
+/* ========== 元件（SVG 层） ========== */
+
+// 同步元件层的尺寸与裁剪矩形，让元件和网格一样只出现在视口内
+function resizeElementLayer() {
+  const vp = getViewport();
+  elemLayer.setAttribute("width", state.cssW);
+  elemLayer.setAttribute("height", state.cssH);
+  elemLayer.style.width = state.cssW + "px";
+  elemLayer.style.height = state.cssH + "px";
+  clipRect.setAttribute("x", vp.x);
+  clipRect.setAttribute("y", vp.y);
+  clipRect.setAttribute("width", vp.w);
+  clipRect.setAttribute("height", vp.h);
+}
+
+// 建一个元件节点：路径取指定类型（由类型表生成），摆放靠每帧写 transform，所以节点本身不带位置
+// opacity 用于虚影，取 1 就是实体元件
+function createElementNode(typeId, opacity) {
+  const node = document.createElementNS(SVG_NS, "path");
+  node.setAttribute("d", elementPathD(typeId));
+  node.setAttribute("fill", hslCss(elementHSL.fill));
+  node.setAttribute("stroke", hslCss(elementHSL.stroke));
+  // 描边宽度用世界单位，随缩放一起放大，元件轮廓才始终跟着元件走
+  node.setAttribute("stroke-width", CONFIG.elementStroke);
+  // 圆角靠描边的圆角连接实现：拐角外侧按描边宽度的一半倒圆，不用改路径数据
+  node.setAttribute("stroke-linejoin", "round");
+  // 先描边后填充：描边内侧那半被填充盖住，只留外面一圈，外框和填充不再重叠
+  node.setAttribute("paint-order", "stroke");
+  // 用整节点透明度而不是 fill-opacity：后者会让填充透光、盖不住描边内侧，虚影的圈会粗一倍
+  node.setAttribute("opacity", opacity);
+  return node;
+}
+
+// 查找占据指定格心的元件；格心坐标是 floor 结果加 0.5，都是精确可表示的半整数，可以直接比较
+// 同一格出现多个元件只是操作途中的临时状态（把选中的元件挪到了别人身上），
+// 而「一格最多一个元件」是模型硬约束，所以这里必须给出唯一答案，交给下面的层级判定
+function findElementAt(wx, wy) {
+  return topElementAtCell(wx, wy);
+}
+
+// 某一格最上层的元件：正在手上（选中）的压在其他元件之上，正在消失的排在最下
+// 这个顺序和绘制顺序完全一致（选中的会被挪到元件层末尾），所以「看到谁在最上面就命中谁」，
+// 命中结果不会和画面矛盾；同层取数组里靠后的，也和绘制顺序对齐
+function topElementAtCell(wx, wy) {
+  let best = null;
+  let bestRank = -1;
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.wx !== wx || el.wy !== wy) continue;
+    // 正在消失的排 0，普通元件排 1，选中元件排 2；这样正在消失的元件永远不会挡住真实元件
+    const rank = el.deleting ? 0 : (el.selected ? 2 : 1);
+    if (rank >= bestRank) { best = el; bestRank = rank; }  // 同层取靠后的，和绘制顺序一致
+  }
+  return best;
+}
+
+// 在指定格心点放置一个指定类型、朝 dir 方向的元件
+function placeElement(wx, wy, dir, typeId) {
+  const node = createElementNode(typeId, 1);
+  elemLayer.appendChild(node);
+  const el = {
+    id: nextElementId++,  // 内部编号：只用来在历史差分里认人，不写进存档；换文档时随新元件重新发号
+    wx: wx, wy: wy, dir: dir, typeId: typeId,
+    angle: dir * 90, angleTarget: dir * 90,  // 初始角度就是放置时的朝向，动画从静止开始
+    node: node, deleting: false, deleteP: 0,
+    on: false,  // 光源的开关状态：由外部点击切换，默认关；只有光源类型会读它
+    selected: false, // 是否被选中：选中即离地，该元件退出电路模拟（不挡光也不发光），落位取消选中时才回到电路里
+    litK: 0,         // number：上一次写进节点的选中进度（0 常态、1 全选中），相同就跳过重写，避免每帧改属性
+    litK2: 0,        // number：上一次写进节点的亮起进度；与 litK 一起当缓存键，灯以外的元件恒为 0
+    litIn: false,    // boolean：本微帧有没有被激光照到；只由结算层写，灯以外的元件不读
+    litP: newEased(0), // Object：灯的亮起缓动进度标量，0 不亮、1 全亮；只有灯会推进它
+    selP: newEased(0), // Object：选中缓动进度标量，0 常态、1 全选中，在固定时长内走缓出曲线
+    selBase: false,  // 拉框按下那一刻的选中快照：按住 Shift 框选时以它为基准做翻转，框动来动去也不会反复横跳
+    orbitU0: null,   // number | null：公转起点格号 u；null 表示这个元件没在公转
+    orbitV0: null,   // number | null：公转起点格号 v
+    orbitAngle0: 0,  // number：公转开始时的角度，公转期间画的角度从它往上加
+    orbitShiftU: 0,  // number：落位吸附量 u：动画途中按进度补上，收尾时正好落在格心上
+    orbitShiftV: 0,  // number：落位吸附量 v
+    mvOffU: 0,       // number：拖动缓动的视觉偏移 u（世界单位）：拖动时先让画面留在原地，再缓出追上目标格
+    mvOffV: 0,       // number：拖动缓动的视觉偏移 v
+    out: 0      // 本微帧要发射的掩码：偏转器与透射器由 scheduleOutputs 按上一微帧的接收结果写入
+  };
+  elements.push(el);
+  rayGraph.dirty = true;  // 元件增删会打乱 elements 下标，阻挡图必须重建
+  sceneDirty = true;      // 新元件的节点需要摆到屏幕位置上，强制重绘一次
+  return el;              // 交给调用方接着改字段（读档要还原光源开关），省得再回头查一遍
+}
+
+// 在屏幕位置处放置元件：吸附到所在格心，视口外不放置，同一格已有元件则忽略
+function placeElementAtScreen(screenX, screenY) {
+  if (!isInViewport(screenX, screenY)) return;
+  const wx = cellCenterX(screenToWorldX(screenX));
+  const wy = cellCenterY(screenToWorldY(screenY));
+  // 一个格子最多一个元件，这是基本逻辑里的硬约束
+  if (findElementAt(wx, wy) !== null) return;
+  // 朝向取虚影当前的目标角度：目标角度永远是 90 的整数倍，取模得到 0 上 1 右 2 下 3 左
+  const dir = ((Math.round(ghostAngleTarget / 90) % 4) + 4) % 4;
+  // 类型取当前选中的槽：放下去的就是手上那个虚影，形状与预览完全一致
+  // 手上拿的是选中工具时没有元件可放，回车直接不响应
+  const typeId = selectedTypeId();
+  if (typeId === null) return;
+  placeElement(wx, wy, dir, typeId);
+  commitHistory();  // 放置是直接改电路的动作，放下去这一刻就记一步
+}
+
+// 一个元件的屏幕变换：平移到格心屏幕位置 → 按角度旋转 → 按缩放放大
+// 参数直接收角度（度），因为虚影旋转动画中途会传入非 90 整数倍的值
+// scaleMul 是删除动画的收缩系数（1 = 原尺寸），必须显式传入，缺省会算出 NaN
+// 等比缩放下旋转与缩放可交换，顺序不影响结果
+function elementTransform(wx, wy, angleDeg, scaleMul) {
+  return "translate(" + worldToScreenX(wx) + " " + worldToScreenY(wy) + ")" +
+    " rotate(" + angleDeg + ")" +
+    " scale(" + state.scale * scaleMul + ")";
+}
+
+// 每帧把元件摆到屏幕上；删除中的元件同时被收缩和淡出
+function renderElements() {
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    // 删除动画的缓动值同时驱动缩放和透明度；没在删除时恒为 0，等于原样绘制
+    const e = el.deleting ? easeOutCubic(el.deleteP) : 0;
+    el.node.setAttribute("opacity", 1 - e);
+    // 公转中的元件画的是弧线上的插值位置：数据要等落位才改，所以此刻画面和数据是有意分开的
+    let wx = el.wx, wy = el.wy, angle = el.angle;
+    if (orbitActive && el.orbitU0 !== null) {
+      const t = easeOutCubic(orbitP);
+      const total = orbitTurns * 90;
+      const rad = total * t * Math.PI / 180;
+      const c = Math.cos(rad), s = Math.sin(rad);
+      const du = el.orbitU0 - orbitPivotU;
+      const dv = el.orbitV0 - orbitPivotV;
+      // 吸附量随进度线性补上：走到头时画面位置正好等于落位后的格心，不会在收尾时跳半格
+      wx = orbitPivotU + du * c + dv * s + el.orbitShiftU * t + 0.5;
+      wy = orbitPivotV - du * s + dv * c + el.orbitShiftV * t + 0.5;
+      angle = el.orbitAngle0 + total * t;
+    }
+    // 拖动缓动的视觉偏移叠在数据位置之上：数据已经跳到目标格，画面还差一点点，缓出追上后偏移归零
+    // 偏移只影响画面，不参与模拟与占位判定，所以拖动途中激光立刻按新格重算，手感是「跟手但不硬跳」
+    wx += el.mvOffU;
+    wy += el.mvOffV;
+    // 用动画中的连续角度：旋转过程中元件是斜着的，转到位才正对格子
+    el.node.setAttribute("transform", elementTransform(wx, wy, angle, 1 - e));
+    // 选中走「内亮外深」：填充提亮、描边加深加粗，浅底配深边把轮廓扣出来，不额外套框
+    // 灯另走一套：亮起时在 RGB 里把常态色逐通道混向淡红，等价于盖一层淡红遮罩淡入，中间不会绕色环
+    // 其它元件亮起进度恒为 0，仍按原来的 HSL 路径在常态色与选中色之间过渡，行为与改动前完全一致
+    // 两个进度任一变过就重写一次属性，避免每帧无谓重排
+    const kSel = el.selP.cur;
+    const kLit = el.litP.cur;
+    if (el.litK !== kSel || el.litK2 !== kLit) {
+      el.litK = kSel;
+      el.litK2 = kLit;
+      if (el.typeId === "lamp") {
+        // 先按亮起进度混向淡红，再按选中进度混向选中色；两级都逐通道做，蓝到红之间只有一段偏灰的紫
+        const fill = mixRgb(mixRgb(RGB.elementFill, RGB.lampFill, kLit), RGB.selectFill, kSel);
+        const stroke = mixRgb(mixRgb(RGB.elementStroke, RGB.lampStroke, kLit), RGB.selectStroke, kSel);
+        el.node.setAttribute("fill", rgbCss(fill));
+        el.node.setAttribute("stroke", rgbCss(stroke));
+      } else {
+        const fill = mixHslTriple(elementHSL.fill, selectLitHSL.fill, kSel);
+        const stroke = mixHslTriple(elementHSL.stroke, selectLitHSL.stroke, kSel);
+        el.node.setAttribute("fill", hslCss(fill));
+        el.node.setAttribute("stroke", hslCss(stroke));
+      }
+      // 描边宽度跟着选中进度一起从常态加粗到选中值，取消选中时原样退回
+      el.node.setAttribute("stroke-width", CONFIG.elementStroke + (CONFIG.elementStrokeSelected - CONFIG.elementStroke) * kSel);
+    }
+  }
+}
+
+// 找出指针当前所指格子里的元件：视口外或格内没有元件都返回 null
+function findElementAtPointer() {
+  if (!isInViewport(pointerSX, pointerSY)) return null;
+  return findElementAt(cellCenterX(screenToWorldX(pointerSX)), cellCenterY(screenToWorldY(pointerSY)));
+}
+
+// 切换指针所在格光源的开关：只在指针下是存活的光源时生效，空格、其他类型、删除动画中的都忽略
+// 开关一变，发射掩码随之改变，结算层下一微帧就会重算激光场
+function toggleLightAtPointer() {
+  const el = findElementAtPointer();
+  if (el === null || el.deleting || el.typeId !== "light") return;
+  el.on = !el.on;
+  commitHistory();  // 开关本身也是电路状态的一部分，跟着一起可撤销
+}
+
+// 删除屏幕位置所在格的元件：视口外、格内没有元件、或该元件已在删除动画中，都直接忽略
+function deleteElementAtScreen(screenX, screenY) {
+  if (!isInViewport(screenX, screenY)) return;
+  const el = findElementAt(cellCenterX(screenToWorldX(screenX)), cellCenterY(screenToWorldY(screenY)));
+  if (el === null || el.deleting) return;
+  el.deleting = true;
+  el.deleteP = 0;
+  rayGraph.dirty = true;  // 删除动画一开始就把它从模拟里摘掉，不等动画放完
+  commitHistory();  // 标记成「正在消失」这一刻它就已经不算电路里的人了，所以在这里记步
+}
+
+// 删除整个选区：选中的元件一起进入消失动画，压在下面的其他元件不受影响
+// 顺序有讲究：先把它们逐个标成「正在删除」，再走选区总入口清空选中
+// 删除中的元件不会被算作「离开选区」，所以不会像正常落位那样把落点上的其他元件一并顶掉
+// 返回 true 表示这次按键已由选区接手，调用方不必再去删指针所在格
+function deleteSelection() {
+  let any = false;
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el.selected || el.deleting) continue;
+    el.deleting = true;
+    el.deleteP = 0;
+    any = true;
+  }
+  if (!any) return false;
+  applySelection(function () { return false; }, false);
+  return true;
+}
+
+// 每帧推进所有删除中的元件动画；动画走完才真正移除节点和数据
+function updateDeletions(dt) {
+  // 倒序遍历：移除元素用的是 splice，倒着走不会漏掉还没处理的项
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+    if (!el.deleting) continue;
+    el.deleteP = Math.min(1, el.deleteP + dt / CONFIG.elementDeleteDuration);
+    if (el.deleteP >= 1) {
+      // 动画期间这一格仍算被占用，虚影不会提前淡入；走完才腾出格子
+      elemLayer.removeChild(el.node);
+      elements.splice(i, 1);
+      rayGraph.dirty = true;  // splice 让后面所有下标前移，阻挡图里存的下标随之失效
+    }
+  }
+}
+
+/* ========== 撤销 / 重做 ========== */
+
+// 两条记录是否描述同一个元件的同一状态：类型、格号、朝向、开关全一样才算没变
+function recordEquals(a, b) {
+  return a.type === b.type && a.gx === b.gx && a.gy === b.gy && a.dir === b.dir && a.on === b.on;
+}
+
+// 把元件按记录摆回原样：位置、朝向、开关，以及各种动画与拖动的残留一并归零
+// 撤销与重做都走它，两个方向写的是同一套字段，不会出现「撤销干净、重做留尾巴」
+function writeRecord(el, rec) {
+  el.wx = rec.gx + 0.5;   // 元件恒在格心，格号加半格就是世界坐标
+  el.wy = rec.gy + 0.5;
+  el.dir = rec.dir;
+  el.angle = rec.dir * 90;
+  el.angleTarget = el.angle;
+  el.on = rec.on;
+  el.mvOffU = 0;      // 拖动缓动的视觉偏移归零，画面与数据立刻对齐
+  el.mvOffV = 0;
+  el.orbitU0 = null;  // 公转起点作废，避免残留的起点被下一段公转当成自己人
+  el.orbitV0 = null;
+  el.deleting = false;
+  el.deleteP = 0;
+}
+
+// 把元件挂回画面：数据回到列表、节点回到元件层；已经在列表里的只补状态，不重复插入
+// 撤销回来的元件一律是落定状态，不会带着悬空身份复活，也不会留着上一次的选中配色
+function attachElement(el) {
+  if (elements.indexOf(el) < 0) elements.push(el);
+  if (el.node.parentNode !== elemLayer) elemLayer.appendChild(el.node);
+  el.selected = false;
+  el.deleting = false;  // 撤销删除时元件可能还在播消失动画，不清掉的话动画会接着放完、把它真的摘走
+  el.deleteP = 0;
+  el.selP = newEased(0);  // 选中缓动重新起算，否则会从上次留下的进度接着亮
+  el.litP = newEased(0);  // 灯的亮起缓动同样重新起算，撤销回来的灯不会带着上次的亮态
+  el.litIn = false;       // 照到没照到由下一微帧的结算重新判定
+  el.litK = -1;           // 逼下一帧重写配色，把可能残留的选中配色刷回常态
+}
+
+// 把元件从画面摘掉：数据出列表、节点离开元件层，同时从拖动组里除名
+// 摘掉只是「离开画面」，元件对象与它的节点都还被历史里的差分引用着，撤销时原样挂回去
+function detachElement(el) {
+  const i = elements.indexOf(el);
+  if (i >= 0) elements.splice(i, 1);
+  if (el.node.parentNode === elemLayer) elemLayer.removeChild(el.node);
+  const g = moveGroup.indexOf(el);
+  if (g >= 0) moveGroup.splice(g, 1);
+  el.selected = false;
+}
+
+// 重建已落定对照表：只有不正在消失的元件才算电路里的人
+// 悬空中的元件保留它进悬空前的记录：它只是暂时离地，位置还没定下来，不能拿它现在的位置当基准
+// 每次记步与每次撤销/重做之后都要重建，否则下一次比对会拿旧样子当基准、算出假差异
+function rebuildCommittedTable() {
+  const next = new Map();
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.deleting) continue;
+    if (el.selected) {
+      const prev = committedTable.get(el.id);
+      if (prev !== undefined) next.set(el.id, prev);  // 悬空期间新来的（粘贴、导入）本来就不在表里，不建条目
+      continue;
+    }
+    next.set(el.id, { rec: elementToRecord(el), el: el });
+  }
+  committedTable = next;
+}
+
+// 记一步：把这一刻的已落定电路与上一次落定时逐条比，差异就是这一步
+// 新出现的记「挂上来」、消失的记「摘下去」、字段变了的记「从什么样变成什么样」
+// 悬空与正在消失要分开看：正在消失才算离开电路，悬空只是暂时离地，既不算离开也不算新来
+function commitHistory() {
+  const ops = [];
+  const seen = new Set();
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.deleting) continue;  // 正在消失的元件已经不算电路里的人，会被下面那条「摘下去」认领
+    seen.add(el.id);
+    if (el.selected) continue;  // 悬空中的这一轮不比对：位置还没定下来，落地那一刻才比
+    const rec = elementToRecord(el);
+    const prev = committedTable.get(el.id);
+    if (prev === undefined) ops.push({ kind: "attach", el: el, after: rec });
+    else if (!recordEquals(prev.rec, rec)) ops.push({ kind: "set", el: el, before: prev.rec, after: rec });
+  }
+  committedTable.forEach(function (v, id) {
+    // 消失的元件按它「离开那一刻」的样子记，而不是上一次落定的样子：
+    // 它可能在悬空期间被搬动过，撤销删除时应该回到用户最后看到的位置
+    if (!seen.has(id)) ops.push({ kind: "detach", el: v.el, before: elementToRecord(v.el) });
+  });
+  if (ops.length === 0) return;  // 没有真实变化就不占一步，免得空点一下也吃满一百步
+  historyStack.length = historyIndex + 1;  // 在历史中间做了新动作，后面的重做分支作废
+  historyStack.push(ops);
+  historyIndex = historyStack.length - 1;
+  if (historyStack.length > HISTORY_LIMIT) { historyStack.shift(); historyIndex--; }
+  rebuildCommittedTable();
+}
+
+// 执行一组差分：reverse 为真表示撤销（每条反过来做），为假表示重做
+function applyOps(ops, reverse) {
+  const list = reverse ? ops.slice().reverse() : ops;
+  for (let i = 0; i < list.length; i++) {
+    const op = list[i];
+    if (op.kind === "attach") {
+      // 正着走 = 元件进入电路，倒着走 = 退出；进入时按记录摆正，位置才不会停在别处
+      if (reverse) detachElement(op.el);
+      else { attachElement(op.el); writeRecord(op.el, op.after); }
+    } else if (op.kind === "detach") {
+      if (reverse) { attachElement(op.el); writeRecord(op.el, op.before); }
+      else detachElement(op.el);
+    } else {
+      writeRecord(op.el, reverse ? op.before : op.after);
+    }
+  }
+  rayGraph.dirty = true;  // 元件增删或字段变了，谁挡谁与激光场都得重算
+  sceneDirty = true;
+}
+
+// 撤销/重做前先把正在进行的交互收干净：拖动、拉框、公转全部中断
+// 不回退它们已经造成的画面状态，因为紧接着的撤销/重做会把电路整个摆正
+function settleInteractions() {
+  moveDragging = false;
+  movePointerId = -1;
+  moveDGX = 0;
+  moveDGY = 0;
+  moveGroup.length = 0;
+  marqueePressing = false;
+  marqueeActive = false;
+  marqueePointerId = -1;
+  orbitActive = false;
+  orbitP = 0;
+  orbitTurns = 0;
+  for (let i = 0; i < elements.length; i++) {
+    // 公转起点与拖动偏移只存在元件身上，不逐个清掉会留下半截姿态
+    elements[i].orbitU0 = null;
+    elements[i].orbitV0 = null;
+    elements[i].mvOffU = 0;
+    elements[i].mvOffV = 0;
+  }
+}
+
+// 取消当前悬空的一批：整个悬空会话本来就不在历史里，所以这里不动历史，只是把它整个抹掉
+// 原本就在电路里的元件摆回它进入悬空前的样子（位置从已落定对照表里取，对照表在悬空期间一直替它留着旧记录）；
+// 悬空期间新加进来的（粘贴、导入）在对照表里查无此人，说明电路里本来就没有它，直接摘掉
+// 返回 true 表示手上确实有悬空、这次按键已经被它吃掉
+function cancelFloat() {
+  let any = false;
+  // 倒序遍历：摘掉当前项会让后面所有下标前移，倒着走不会漏掉还没处理的项
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+    if (!el.selected || el.deleting) continue;
+    any = true;
+    const prev = committedTable.get(el.id);
+    if (prev === undefined) detachElement(el);
+    else writeRecord(el, prev.rec);
+  }
+  if (!any) return false;
+  settleInteractions();
+  applySelection(function () { return false; }, false);  // 走总入口统一取消选中，落位规则与平时完全一致
+  return true;
+}
+
+// 撤销：手上有悬空就先把它取消（这一步不进历史），否则往回退一步
+function undo() {
+  if (cancelFloat()) return;
+  if (historyIndex < 0) return;
+  settleInteractions();
+  applyOps(historyStack[historyIndex], true);
+  historyIndex--;
+  rebuildCommittedTable();  // 电路已经变了，对照表必须跟着换，否则下一次记步会算出假差异
+  sceneDirty = true;
+}
+
+// 重做：与撤销对称，手上有悬空同样先取消，再往前恢复一步
+function redo() {
+  if (cancelFloat()) return;
+  if (historyIndex + 1 >= historyStack.length) return;
+  settleInteractions();
+  historyIndex++;
+  applyOps(historyStack[historyIndex], false);
+  rebuildCommittedTable();
+  sceneDirty = true;
+}
+
+// 换文档（打开文件）后历史跟着清空：换文档不是编辑动作，留着上一条电路的历史只会撤出莫名其妙的画面
+function resetHistory() {
+  historyStack = [];
+  historyIndex = -1;
+  rebuildCommittedTable();
+}
+
+/* ========== 阻挡图 ========== */
+
+// 取元件在全局某轴上的阻挡属性：元件朝左/朝右时自身转了 90°，局部水平与垂直互换
+// 参数 horizontal 为 true 表示问「挡不挡全局水平激光」，false 表示问全局垂直
+function blocksGlobal(el, horizontal) {
+  const t = ELEMENT_TYPES[el.typeId];
+  const same = horizontal ? t.blocksH : t.blocksV;
+  const swapped = horizontal ? t.blocksV : t.blocksH;
+  return el.dir % 2 === 0 ? same : swapped;
+}
+
+// 重建阻挡图：按 wy 分出行、按 wx 分出列，各自排序后扫一遍，给每个元件记下四方向第一个阻挡者
+// 结算时只需读表，不必每微帧拿坐标比大小，所以只在元件增删或朝向改变后调用一次
+function rebuildRayGraph() {
+  const rows = new Map();
+  const cols = new Map();
+  // 正在删除的、以及悬空的元件都不参与模拟：前者算「已被删掉」，后者算「还没放进世界」
+  // 悬空即被选中；选中等于离地，要等落位（取消选中）那一刻才回到电路里
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.deleting || el.selected) continue;
+    if (!rows.has(el.wy)) rows.set(el.wy, []);
+    rows.get(el.wy).push(i);
+    if (!cols.has(el.wx)) cols.set(el.wx, []);
+    cols.get(el.wx).push(i);
+  }
+  // 排序之后「第一个阻挡者」就退化成数组上的一次邻项扫描，不用再比坐标
+  rows.forEach(function (arr) {
+    arr.sort(function (a, b) { return elements[a].wx - elements[b].wx; });
+  });
+  cols.forEach(function (arr) {
+    arr.sort(function (a, b) { return elements[a].wy - elements[b].wy; });
+  });
+
+  const n = elements.length;
+  const endR = new Array(n).fill(-1);
+  const endL = new Array(n).fill(-1);
+  const endD = new Array(n).fill(-1);
+  const endU = new Array(n).fill(-1);
+
+  // 行内向右：从右往左扫，扫到 p 时手上拿的就是 p 右边最近的阻挡者位置
+  // 没人挡时终点记行数组长度 k，这样 [p, endR] 正好是激光覆盖的下标闭区间，结算时不用再分支
+  rows.forEach(function (arr) {
+    const k = arr.length;
+    let next = k;
+    for (let p = k - 1; p >= 0; p--) {
+      const i = arr[p];
+      endR[i] = next;
+      if (blocksGlobal(elements[i], true)) next = p;
+    }
+    // 行内向左：从左往右扫，没人挡记 -1
+    let prev = -1;
+    for (let p = 0; p < k; p++) {
+      const i = arr[p];
+      endL[i] = prev;
+      if (blocksGlobal(elements[i], true)) prev = p;
+    }
+  });
+
+  // 列：列数组按 wy 升序，而 wy 越大在屏幕上越靠上，所以下标增大方向是「上」
+  cols.forEach(function (arr) {
+    const k = arr.length;
+    let next = k;
+    for (let p = k - 1; p >= 0; p--) {
+      const i = arr[p];
+      endU[i] = next;   // 下标更大 = wy 更大 = 视觉更靠上，所以这是「向上」的阻挡者
+      if (blocksGlobal(elements[i], false)) next = p;
+    }
+    let prev = -1;
+    for (let p = 0; p < k; p++) {
+      const i = arr[p];
+      endD[i] = prev;   // 下标更小 = wy 更小 = 视觉更靠下
+      if (blocksGlobal(elements[i], false)) prev = p;
+    }
+  });
+
+  rayGraph.rows = rows;
+  rayGraph.cols = cols;
+  rayGraph.endR = endR;
+  rayGraph.endL = endL;
+  rayGraph.endD = endD;
+  rayGraph.endU = endU;
+  rayGraph.dirty = false;
+}
+
+/* ========== 结算 ========== */
+
+// 单微帧结算：重建阻挡图（若脏）→ 收集发射 → 算接收掩码与激光场
+// 元件规则已接入 elementEmit，后续新增元件类型只需在 elementEmit 里补一条分支
+function stepMicroframe() {
+  // 元件增删或朝向定下来之后才重建阻挡图；重建会让上一微帧的发射掩码作废，必须重算
+  if (rayGraph.dirty) {
+    rebuildRayGraph();
+    lastEmit = null;
+  }
+  const emit = buildEmitMask();
+  // 发射掩码与上一微帧完全一致时，激光场与接收掩码必然不变，跳过重算
+  // 既省掉空转时的重复计算，也让下面的临时打印只在真有变化时输出
+  if (!emitEquals(emit, lastEmit)) {
+    recvMask = computeRecvMask(emit);
+    laserSegments = computeLaserSegments(emit);
+    scheduleOutputs(recvMask);  // 按本微帧的接收排下一微帧的输出，微时序的 1 帧延迟就落在这一步
+    updateLampInputs(recvMask); // 顺手把接收结果落到灯身上，决定它这一微帧亮不亮
+    lastEmit = emit.slice();    // 存一份副本而不是直接引用；否则 runToQuiescence 里比较前后两个状态时永远相等
+    sceneDirty = true;  // 激光场变了，强制重绘一次，否则静止判定会把这次变化吞掉
+  }
+  microframe++;  // 时钟自增：本微帧的结算已完成，进入下一微帧
+}
+
+// 按当前微帧时长推进时钟：把本帧真实时长换算成微帧数逐个结算
+// 用累加余数而不是直接取整，避免帧率与微帧时长不成整数倍时把零头丢掉、时钟越走越慢
+// 单帧步数设上限，超出的积压时间直接丢弃，否则一帧要补算的量会越滚越大
+function stepSimulation(dt) {
+  // 速度滑块拉到最左端：不设延迟，本帧内直接把整条链结算到底，不等真实时间
+  if (microDt <= 0) {
+    runToQuiescence();
+    return;
+  }
+  microAcc += dt;
+  let steps = 0;
+  while (microAcc >= microDt && steps < CONFIG.maxStepsPerFrame) {
+    microAcc -= microDt;
+    stepMicroframe();
+    steps++;
+  }
+  if (microAcc >= microDt) microAcc = 0;
+}
+
+// 不设延迟时把整条链在一帧内跑完：反复结算，直到某一微帧的发射掩码与上一微帧完全相同
+// 掩码没变说明没有任何元件再产生新输出，链已停住；上限只用来防止逻辑成环时死循环
+// 元件之间那 1 微帧的延迟仍然保留，只是不再等真实时间，逻辑语义与慢速时完全一致
+function runToQuiescence() {
+  microAcc = 0;  // 零延迟下不攒余数，否则切回慢速时会突然补算一帧
+  for (let i = 0; i < CONFIG.maxQuiescentSteps; i++) {
+    const before = lastEmit;
+    stepMicroframe();
+    // 用值比较而不是引用比较：lastEmit 是 slice 出来的副本，引用每轮都变，不能用 === 判断
+    // before 为 null 时说明还没初始化过，不能算"停了"
+    if (before !== null && emitEquals(lastEmit, before)) return;
+  }
+}
+
+// 收集本微帧所有元件要发射的方向，返回以 elements 下标为索引的位掩码
+// 正在删除的与悬空的元件都已从模拟里摘掉，既不发射也不接收，所以直接跳过
+function buildEmitMask() {
+  const emit = new Array(elements.length).fill(0);
+  for (let i = 0; i < elements.length; i++) {
+    if (elements[i].deleting || elements[i].selected) continue;
+    emit[i] = elementEmit(elements[i]);
+  }
+  return emit;
+}
+
+// 单个元件的输出规则：返回它本微帧要发射的方向位掩码，0 表示不发射
+// 光源：开启时朝箭头方向发射；它不接收任何输入，所以只看自身开关
+// 灯：只作指示，收到光也不发射，永远返回 0
+// 偏转器与透射器：输出规则相同（收到有效输入就朝箭头方向发），具体值由上一微帧排好的 el.out 给出
+function elementEmit(el) {
+  if (el.typeId === "light") return el.on ? (1 << el.dir) : 0;
+  if (el.typeId === "lamp") return 0;
+  return el.out;
+}
+
+// 把本微帧的接收结果落到灯身上：只要有任何一侧的激光射到它，就算被照亮
+// 灯是实体，来光到它中心即终止，所以「被照到」正好等于接收掩码非零，不需要再区分方向
+// 只在掩码重算的分支里调用：掩码不变时灯的亮灭自然沿用上一微帧，不会无故闪断
+function updateLampInputs(recv) {
+  for (let i = 0; i < elements.length; i++) {
+    if (elements[i].typeId !== "lamp") continue;
+    elements[i].litIn = recv[i] !== 0;
+  }
+}
+
+// 按本微帧的接收结果安排各元件下一微帧的输出，实现文档 §8.2 的「t 微帧接收、t+1 微帧输出」
+// 出口规则：元件只朝箭头方向输出，所以来自箭头侧的输入一律无效，只有其他侧来光才算有效输入
+// 光源不参与：它的输出完全由开关决定，elementEmit 里已经直接算好
+// 灯也不参与：它只作指示，收到光只用来点亮自己，不会往下游发
+function scheduleOutputs(recv) {
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.deleting || el.selected || el.typeId === "light" || el.typeId === "lamp") continue;
+    const valid = recv[i] & ~(1 << el.dir);  // 抹掉出口侧那一位，剩下的位里只要有一位就是有效输入
+    // 反相器是非门：有有效输入就不发射、没有输入才发射，正好与偏转器、透射器相反
+    if (el.typeId === "inverter") {
+      el.out = valid ? 0 : (1 << el.dir);
+    } else {
+      el.out = valid ? (1 << el.dir) : 0;
+    }
+  }
+}
+
+// 判断两个发射掩码是否完全一致：长度不同或任一位不同都算不一致
+// 掩码一致且阻挡图未重建时，激光场与接收掩码必然一模一样，本微帧可以直接跳过重算
+function emitEquals(a, b) {
+  if (b === null || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// 算出每个元件的接收掩码：某一位为 1，表示「有一个位于我这一侧的发射者，它的激光覆盖到了我」
+// 注意不是「我这一侧有没有激光」：从对面射来又穿过去的光两侧都有，但它只从对面来，出口规则要靠这个区别
+// 每行每列各扫两遍：前缀最大管「左边来的光最远射到哪」，后缀最小管「右边来的光最远射到哪」
+// 这样整行一趟 O(行长) 就能得到该行所有人的掩码，不必让每条激光各自去标记自己覆盖了谁
+function computeRecvMask(emit) {
+  const mask = new Array(elements.length).fill(0);
+
+  // 行：从左往右，reach 是「左边所有朝右发射的激光里，能覆盖到的最右位置」
+  rayGraph.rows.forEach(function (arr) {
+    const k = arr.length;
+    let reach = -1;
+    for (let p = 0; p < k; p++) {
+      const i = arr[p];
+      // 先判后记，严格不等式把元件自己排除在外：自己发的光不该算成自己的输入
+      if (reach >= p) mask[i] |= SIDE_LEFT;
+      if (emit[i] & SIDE_RIGHT) reach = Math.max(reach, rayGraph.endR[i]);
+    }
+    // 行：从右往左，reach2 是「右边所有朝左发射的激光里，能覆盖到的最左位置」
+    let reach2 = k;
+    for (let p = k - 1; p >= 0; p--) {
+      const i = arr[p];
+      if (reach2 <= p) mask[i] |= SIDE_RIGHT;
+      if (emit[i] & SIDE_LEFT) reach2 = Math.min(reach2, rayGraph.endL[i]);
+    }
+  });
+
+  // 列：列数组按 wy 升序，下标增大方向是「上」，两趟扫描的逻辑与行完全一致
+  rayGraph.cols.forEach(function (arr) {
+    const k = arr.length;
+    let reach = -1;
+    for (let p = 0; p < k; p++) {
+      const i = arr[p];
+      if (reach >= p) mask[i] |= SIDE_DOWN;   // 来自更小下标 = wy 更小 = 视觉下方
+      if (emit[i] & SIDE_UP) reach = Math.max(reach, rayGraph.endU[i]);
+    }
+    let reach2 = k;
+    for (let p = k - 1; p >= 0; p--) {
+      const i = arr[p];
+      if (reach2 <= p) mask[i] |= SIDE_UP;    // 来自更大下标 = wy 更大 = 视觉上方
+      if (emit[i] & SIDE_DOWN) reach2 = Math.min(reach2, rayGraph.endD[i]);
+    }
+  });
+
+  return mask;
+}
+
+// 合并同一行（或同一列）上的区间：按起点排序后一遍扫过，与上一段相接或重叠就并进去
+// 相接也算并，因为激光场是个点集，首尾相接的两段对模型来说就是连续的一段
+// 区间用的是阻挡图里的位置坐标，无人阻挡的两端记 -1 和数组长度，都是有限整数，排序不会碰到 Infinity
+function mergeSpans(spans) {
+  spans.sort(function (s, t) { return (s[0] - t[0]) || (s[1] - t[1]); });
+  const merged = [];
+  for (let j = 0; j < spans.length; j++) {
+    const s = spans[j];
+    const last = merged[merged.length - 1];
+    if (last !== undefined && s[0] <= last[1]) {
+      if (s[1] > last[1]) last[1] = s[1];
+    } else {
+      merged.push([s[0], s[1]]);
+    }
+  }
+  return merged;
+}
+
+// 位置坐标换成世界坐标：位置 -1 表示左边没人挡、位置等于数组长度表示右边没人挡，都换成 ±Infinity
+// 有限位置直接取该位置元件对应的坐标分量，key 传 "wx" 或 "wy"
+function spanToWorld(arr, key, p) {
+  if (p === -1) return -Infinity;
+  if (p === arr.length) return Infinity;
+  return elements[arr[p]][key];
+}
+
+// 单微帧的激光场：先按阻挡图给每条射线定出两端，再按行、按列各自取并集
+// 取并集是模型要求：同一条线上重叠或相接的激光，作为点集本来就是一段，不能当成多条
+// 返回 [{horizontal, key, a, b}]：horizontal 为 true 是行上的线段，key 是该行 wy，a/b 是两端的 wx；反之是列
+function computeLaserSegments(emit) {
+  const out = [];
+
+  // 行：固定坐标是 wy，变化坐标是 wx
+  rayGraph.rows.forEach(function (arr, wy) {
+    const k = arr.length;
+    const spans = [];
+    for (let p = 0; p < k; p++) {
+      const i = arr[p];
+      if (emit[i] & SIDE_RIGHT) spans.push([p, rayGraph.endR[i]]);  // 向右：起点是自己，终点是右边最近的阻挡者
+      if (emit[i] & SIDE_LEFT) spans.push([rayGraph.endL[i], p]);   // 向左：起点是左边最近的阻挡者，终点是自己
+    }
+    const merged = mergeSpans(spans);
+    for (let j = 0; j < merged.length; j++) {
+      out.push({
+        horizontal: true, key: wy,
+        a: spanToWorld(arr, "wx", merged[j][0]),
+        b: spanToWorld(arr, "wx", merged[j][1])
+      });
+    }
+  });
+
+  // 列：固定坐标是 wx，变化坐标是 wy
+  rayGraph.cols.forEach(function (arr, wx) {
+    const k = arr.length;
+    const spans = [];
+    for (let p = 0; p < k; p++) {
+      const i = arr[p];
+      if (emit[i] & SIDE_UP) spans.push([p, rayGraph.endU[i]]);    // 向上：起点是自己，终点是上方最近的阻挡者
+      if (emit[i] & SIDE_DOWN) spans.push([rayGraph.endD[i], p]);  // 向下：起点是下方最近的阻挡者，终点是自己
+    }
+    const merged = mergeSpans(spans);
+    for (let j = 0; j < merged.length; j++) {
+      out.push({
+        horizontal: false, key: wx,
+        a: spanToWorld(arr, "wy", merged[j][0]),
+        b: spanToWorld(arr, "wy", merged[j][1])
+      });
+    }
+  });
+
+  return out;
+}
+
+/* ========== 选中 ========== */
+
+// 当前是不是「选中工具」：只有它被选中时，画布上的左键才是选择而不是放置
+// 放置与选择共用一个左键，靠这个判据分流，两边不会互相抢操作
+function selectToolActive() {
+  return slotSelectedIndex === SELECT_SLOT_INDEX;
+}
+
+// 切换选中的选项槽：手上虚影随之换成新类型；从选中工具切走时立刻把选区收掉
+// 收选区必须「立刻」而不是等下次操作：元件一直离地会让画面和数据长期不一致，用户也看不到落位结果
+function setSelectedSlot(index) {
+  const wasSelect = selectToolActive();
+  slotSelectedIndex = index;
+  if (wasSelect && !selectToolActive()) exitSelectTool();
+  applyGhostType();
+}
+
+// 退出选中模式：把所有选中一并取消，离地的元件就地落位（落点上的普通元件被顶掉）
+// 走 applySelection 这个总入口，落位规则与「单击空白清空选中」完全一致，不会出现两套行为
+function exitSelectTool() {
+  let any = false;
+  for (let i = 0; i < elements.length; i++) {
+    if (elements[i].selected) { any = true; break; }
+  }
+  if (!any) return;  // 本来就没选中：不白跑一遍落位
+  applySelection(function () { return false; }, false);
+}
+
+// ===== 选区框架 =====
+// 「谁被选中」和「选区有没有离地」是两件事：
+// 离地 = 这批元件暂时不跟地图发生占用关系，压在别人的格子上也不会把别人顶掉，画面上允许暂时重叠；
+// 只有元件离开选区那一刻才落地，落点格子上没被选中的元件才被顶掉。
+// 单击和拉框共用 applySelection 这一个入口，「不按 Shift 只留命中的、按住 Shift 逐个翻转」只有一份规则。
+
+// 落位：把「这一轮离开选区」的元件放下来，落点格子上没被选中的元件直接顶掉
+// 用立即移除而不是走删除动画：动画期间那一格仍算被占用，会和刚落下的元件叠在同一格里
+// 只有离开选区的元件才落地，继续留在选区里的仍然离地，所以拖动、旋转中途随便改主意都不会造成不可逆的破坏
+function landSelection(landing) {
+  if (landing.length === 0) return;
+  let removed = 0;
+  // 倒序遍历：splice 会让后面所有下标前移，倒着走不会漏掉还没处理的项
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+    if (el.selected || el.deleting) continue;        // 还在选区里的自己人不能动；正在消失的元件不参与判定
+    if (landing.indexOf(el) >= 0) continue;          // 这次落地的自己人留着
+    if (!cellOccupiedBy(landing, el.wx, el.wy)) continue;  // 没有落地元件压住它这一格，留着
+    elemLayer.removeChild(el.node);
+    elements.splice(i, 1);
+    removed++;
+  }
+  // 真的顶掉了才需要重算：否则每一下拉框都会全量重建阻挡图，白卡一顿
+  if (removed > 0) rayGraph.dirty = true;  // splice 让下标前移，阻挡图里存的下标随之失效
+}
+
+// 指定格心是否被名单里某个元件占着：落位判定用，只看格心相等
+function cellOccupiedBy(list, wx, wy) {
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].wx === wx && list[i].wy === wy) return true;
+  }
+  return false;
+}
+
+// 选区判定总入口：单击与拉框都走这里，两边的规则不会各写一份、慢慢跑偏
+// isHit 是个判定函数，告诉框架某个元件这一轮算不算被命中（单击看是不是指针所在那个，拉框看格子与框有没有相交）
+// toggle 为真（按住 Shift）时以按下时的快照为基准逐个翻转；为假时按常规「只留命中的」处理
+// 翻转用快照而不是当前状态，所以框拉大拉小、来回拖，同一个元件都不会反复横跳
+function applySelection(isHit, toggle) {
+  const landing = [];  // 这一轮从「选中」变成「不选中」的元件：只有它们算被放下
+  const nextSel = [];  // 与 elements 一一对应的新选中状态，先全部算好再统一写回
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    let sel = false;
+    if (!el.deleting) {  // 删除动画中的元件不参与选中
+      const hit = isHit(el);
+      sel = toggle ? (hit ? !el.selBase : el.selBase) : hit;
+      if (el.selected && !sel) landing.push(el);  // 离开选区，这一刻才落地
+    }
+    nextSel.push(sel);
+  }
+  for (let i = 0; i < elements.length; i++) elements[i].selected = nextSel[i];  // 先写回状态，落地时按新状态认人
+  landSelection(landing);  // 只有离开选区的那些才放下；Shift 加点新元件不会把手上这批顺手提交掉
+  raiseSelectedElements();  // 选中的挪到元件层最上面，和命中判定的上下关系保持一致
+  selOrientDir = 0;  // 这一批算新选区，朝向从朝上重新起算，接着按 WASD 才是相对「朝上」转
+  rayGraph.dirty = true;  // 选中集合一变，参与模拟的元件就变了，阻挡图必须按新集合重建
+  sceneDirty = true;
+  // 记一步：元件落地、以及落点顶掉别人，都发生在这一刻，这才是电路真正被改动的时刻
+  // 拉框途中不记：每动一下都记会把一次框选拆成几十步，等松手时统一记一次
+  if (!marqueeActive) commitHistory();
+}
+
+// 把选中的元件挪到元件层最上面：正在手上的那一批压在其他元件之上
+// 这样「谁在最上面」和命中判定用的是同一个顺序，用户看到哪个就能选到哪个，不会出现看得见却选不中的情况
+// 只在选区变化时调用一次；appendChild 作用在已有子节点上等于把它挪到末尾，不必每帧重排
+function raiseSelectedElements() {
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.selected && !el.deleting) elemLayer.appendChild(el.node);
+  }
+}
+
+// 单击选中：命中的是指针所在那一格的元件；点空白处谁都没命中，等于清空全部选中
+// 按住 Shift 时和拉框一样走翻转，点一下就在「选中」与「未选中」之间切一次
+function selectAtPointer(toggle) {
+  const el = findElementAtPointer();
+  const hitEl = (el !== null && !el.deleting) ? el : null;  // 删除动画中的元件不算点中，避免选到一个正在消失的东西
+  applySelection(function (e) { return e === hitEl; }, toggle);
+}
+
+// 框选：逐个判元件所占的格子与拉框矩形是否相交，相交即命中
+// 用整格去判而不是用格心：框擦到格子边缘也算命中，和常见画图软件的手感一致
+function selectInMarquee(x0, y0, x1, y1, toggle) {
+  const left = Math.min(x0, x1);
+  const right = Math.max(x0, x1);
+  const top = Math.min(y0, y1);
+  const bottom = Math.max(y0, y1);
+  const half = state.scale / 2;  // 半格在屏幕上的像素数：一格是 1×1 世界单位，所以整格宽就是当前缩放
+  applySelection(function (el) {
+    const cx = worldToScreenX(el.wx);
+    const cy = worldToScreenY(el.wy);
+    if (!(cx + half >= left && cx - half <= right && cy + half >= top && cy - half <= bottom)) return false;
+    // 同一格只认最上层那个：被压住的元件不参与命中，否则一格会同时选中两个元件
+    return el === topElementAtCell(el.wx, el.wy);
+  }, toggle);
+}
+
+// 拉框按下：记下起点并捕获指针，这样指针移出画布甚至移出窗口也能继续收到 move
+function beginMarquee(e) {
+  marqueePointerId = e.pointerId;
+  marqueePressing = true;
+  marqueeActive = false;
+  marqueeStartSX = e.clientX;
+  marqueeStartSY = e.clientY;
+  marqueeEndSX = e.clientX;
+  marqueeEndSY = e.clientY;
+  // 按下的这一刻把每个元件的选中状态存一份快照：按住 Shift 框选时的翻转以它为基准，
+  // 拖动过程中选中状态一直在变，不存快照的话同一个元件会被反复翻转
+  for (let i = 0; i < elements.length; i++) elements[i].selBase = elements[i].selected;
+  canvas.setPointerCapture(e.pointerId);
+}
+
+// 拉框移动：超过阈值才算真的在拉框，没超过仍按单击处理，避免手一抖就拉出一个空框把选中清掉
+function moveMarquee(e) {
+  if (!marqueePressing || e.pointerId !== marqueePointerId) return;
+  marqueeEndSX = e.clientX;
+  marqueeEndSY = e.clientY;
+  if (!marqueeActive) {
+    const dx = marqueeEndSX - marqueeStartSX;
+    const dy = marqueeEndSY - marqueeStartSY;
+    if (dx * dx + dy * dy < CONFIG.marqueeThreshold * CONFIG.marqueeThreshold) return;
+    marqueeActive = true;
+  }
+  // 边拉边亮：每动一下都按当前框重算一遍选中，框到的元件立刻提亮，缩回去的自动退回未选中
+  // 与松开时用的是同一个判定，所见即所得，不会出现「预览亮着、松手结果不一样」
+  // 按住 Shift 就切到翻转模式，拖动途中按下或松开 Shift 都能即时切换，不必重新拉框
+  selectInMarquee(marqueeStartSX, marqueeStartSY, marqueeEndSX, marqueeEndSY, e.shiftKey);
+  sceneDirty = true;  // 框要跟着指针走，每动一下都得重画
+}
+
+// 拉框松开：真拉出框了就按框选一批，否则当成一次单击（选中点中的元件，或清空选中）
+// 两条路都要走，否则「按下不动再松开」会既没选中也没清空，手感很怪
+// 单击时把 Shift 状态一并传下去，这样 Shift+单击也能像 Shift+框选那样翻转，两边的规则完全一致
+function endMarquee(e) {
+  if (marqueeActive) selectInMarquee(marqueeStartSX, marqueeStartSY, marqueeEndSX, marqueeEndSY, e.shiftKey);
+  else selectAtPointer(e.shiftKey);
+  marqueePressing = false;
+  marqueeActive = false;
+  marqueePointerId = -1;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  sceneDirty = true;
+  commitHistory();  // 框选期间刻意不记步，松手这一刻把整场框选（含落位顶替）合成一步
+}
+
+// 拉框被系统打断（如触控中断）：只收状态、不动选中，免得把用户已有的选择误清掉
+function cancelMarquee(e) {
+  marqueePressing = false;
+  marqueeActive = false;
+  marqueePointerId = -1;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  sceneDirty = true;
+  commitHistory();  // 框选途中已经有元件落过地，被打断也要把那些改动记下来，否则会和后面的步混成一步
+}
+
+// 按下已选中的元件：进入拖动准备态，记下起点世界坐标，并把这一批选中的元件收进拖动组
+// 组里存的是元件引用而不是下标：落地时可能删掉被覆盖的元件，下标会整体前移，存下标会指错人
+function beginMove(e) {
+  moveDragging = true;
+  movePointerId = e.pointerId;
+  moveStartWX = screenToWorldX(e.clientX);
+  moveStartWY = screenToWorldY(e.clientY);
+  moveDGX = 0;
+  moveDGY = 0;
+  moveGroup.length = 0;
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.selected && !el.deleting) moveGroup.push(el);  // 删除动画中的元件不带走
+  }
+  canvas.setPointerCapture(e.pointerId);
+}
+
+// 拖动中：按指针相对按下点的位移算出整数格位移，只把「与上次的差值」加给元件，避免每帧重复累加
+// 位移取整到整格，数据始终落在格心上；画面位置另加一份缓动偏移，松手前会平滑追上，看着不硬跳
+// 拖动期间相机不动，所以直接用按下时的世界坐标当基准，不必每帧换算参考点
+function moveSelectionDrag(e) {
+  if (!moveDragging || e.pointerId !== movePointerId) return;
+  const dgx = Math.round(screenToWorldX(e.clientX) - moveStartWX);
+  const dgy = Math.round(screenToWorldY(e.clientY) - moveStartWY);
+  if (dgx === moveDGX && dgy === moveDGY) return;  // 还没跨到下一格：不动元件，也不必重算激光
+  const stepX = dgx - moveDGX;
+  const stepY = dgy - moveDGY;
+  moveDGX = dgx;
+  moveDGY = dgy;
+  for (let i = 0; i < moveGroup.length; i++) {
+    const el = moveGroup[i];
+    el.wx += stepX;
+    el.wy += stepY;
+    // 视觉偏移反向补上这一步：数据已经跳到新格，画面先留在原处，再由 updateMoveAnim 缓出追上
+    el.mvOffU -= stepX;
+    el.mvOffV -= stepY;
+  }
+  rayGraph.dirty = true;  // 位置变了，谁挡谁的结论随之改变，下一微帧按新位置重算激光
+  sceneDirty = true;      // 元件节点要摆到新格心上，强制重绘一次
+}
+
+// 松开左键：只收拖动状态，不动地图上的其他元件
+// 落点顶替不在这里做——选区结束（重新确定选区）时才统一落位，拖动中途随便改主意都不会造成不可逆的破坏
+// 没挪动过（原地按下又松开）就什么都不做：多选时点一下已选中的元件不该把选中收缩成一个
+function endMove(e) {
+  moveDragging = false;
+  movePointerId = -1;
+  moveDGX = 0;
+  moveDGY = 0;
+  moveGroup.length = 0;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  sceneDirty = true;
+}
+
+// 拖动被系统打断（如触控中断）：把元件退回原位再收状态
+// 位移是整组统一的整数格位移，反向加回去即可，不需要逐个记原始坐标
+function cancelMove(e) {
+  for (let i = 0; i < moveGroup.length; i++) {
+    const el = moveGroup[i];
+    el.wx -= moveDGX;
+    el.wy -= moveDGY;
+    el.mvOffU = 0;  // 退回原位是「撤销」，不该留缓动尾巴，直接归零让画面与数据立刻对齐
+    el.mvOffV = 0;
+  }
+  if (moveDGX !== 0 || moveDGY !== 0) rayGraph.dirty = true;  // 退回去了，激光要按原位重算
+  moveDragging = false;
+  movePointerId = -1;
+  moveDGX = 0;
+  moveDGY = 0;
+  moveGroup.length = 0;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  sceneDirty = true;
+}
+
+// 选中元件的包围盒，用格号表示：没有选中元件时返回 null
+// 元件一定在格心上，格心坐标减 0.5 就是整数格号，可以直接取整
+function selectionBounds() {
+  let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity, n = 0;
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el.selected || el.deleting) continue;
+    const u = Math.round(el.wx - 0.5);
+    const v = Math.round(el.wy - 0.5);
+    if (u < uMin) uMin = u;
+    if (u > uMax) uMax = u;
+    if (v < vMin) vMin = v;
+    if (v > vMax) vMax = v;
+    n++;
+  }
+  if (n === 0) return null;
+  return { uMin: uMin, uMax: uMax, vMin: vMin, vMax: vMax };
+}
+
+// 起一段公转：把每个元件的起点格号与起点角度记在它自己身上，进度归零
+// 起点只记在元件上，动画期间元件的 wx/wy 一动不动，激光要等落位后才按新位置重算
+function beginOrbit(refs, pivotU, pivotV, turns) {
+  orbitPivotU = pivotU;
+  orbitPivotV = pivotV;
+  orbitTurns = turns;
+  orbitP = 0;
+  const total = turns * 90;
+  for (let i = 0; i < refs.length; i++) {
+    const el = refs[i];
+    el.orbitU0 = Math.round(el.wx - 0.5);
+    el.orbitV0 = Math.round(el.wy - 0.5);
+    el.orbitAngle0 = el.angle;
+    // 轴心在半格上时，转完的精确位置会卡在半格边界，落位要吸附回格心；把这个吸附量先记下来，
+    // 动画途中按进度逐步补上，收尾那一下才不会整批跳半格
+    const p = orbitPoint(el.orbitU0, el.orbitV0, total);
+    el.orbitShiftU = Math.round(p.u) - p.u;
+    el.orbitShiftV = Math.round(p.v) - p.v;
+  }
+  orbitActive = true;
+  sceneDirty = true;
+}
+
+// 走一步公转：上一段还在飞就先把它的终点落位，再按当前选中的元件重新起一段
+// 这样连续跨过好几格也不丢步，只是每段动画被压缩成「立即到位」
+// 拖拽弧线与 WASD 都走这里，选区朝向也在这里同步推进，两条入口不会各自记一份朝向
+function applyOrbitStep(step) {
+  if (step === 0) return;
+  if (orbitActive) finishOrbit();
+  const refs = [];
+  for (let i = 0; i < elements.length; i++) {
+    if (elements[i].selected && !elements[i].deleting) refs.push(elements[i]);
+  }
+  if (refs.length === 0) return;
+  // 整批转了 step 个 90°，选区朝向跟着一起走，下次按键才是相对新朝向算要转多少
+  selOrientDir = ((selOrientDir + step) % 4 + 4) % 4;
+  beginOrbit(refs, rotPivotU, rotPivotV, step);
+}
+
+// 用 WASD 把整个选区转到按下的方向：上、右、下、左，整批按最短路径一起转 90° 的整数倍
+// 要转多少以选区自己的朝向为准（新选区一律朝上），不是看某个元件的角度，所以整批刚体旋转、相对形状不变
+// 轴心沿用拖拽弧线那套「包围盒几何中心」，每次按键按当前包围盒重算，转完再吸附回格心
+// 返回 true 表示这次按键已经由选区接手；没有选中元件时返回 false，让调用方退回悬停元件 / 虚影的老逻辑
+function rotateSelectionToDir(dirKey) {
+  let hasSelection = false;
+  for (let i = 0; i < elements.length; i++) {
+    if (elements[i].selected && !elements[i].deleting) { hasSelection = true; break; }
+  }
+  if (!hasSelection) return false;
+  // 上一段公转还在飞就先落位，否则朝向与画面错位，整批会多转一步或少转一步
+  if (orbitActive) finishOrbit();
+  const steps = Math.round(shortestTurnTo(selOrientDir * 90, dirKey * 90) / 90);
+  if (steps === 0) return true;  // 已经朝着这个方向：不做动作，但也不能再落到悬停元件上
+  const b = selectionBounds();
+  if (b === null) return true;
+  rotPivotU = (b.uMin + b.uMax) / 2;
+  rotPivotV = (b.vMin + b.vMax) / 2;
+  applyOrbitStep(steps);
+  return true;
+}
+
+// 用 WASD 把指针悬停的那个元件转到按下的方向：没有选区时的第二顺位
+// 与虚影共用同一套「最短路径」算法：元件自带朝向，只拨到目标朝向，不顺着累积角度绕远路
+// 转完立刻记一步：悬停旋转是就地生效的改动，不像选区那样「悬空」，不记的话撤销会跳过它去撤更早的动作
+// 返回 true 表示这次按键已经由悬停元件接手；指针下没元件（空格、视口外、正在消失的）时返回 false，让调用方退回虚影
+function rotateHoveredElement(dirKey) {
+  if (!pointerInside) return false;
+  if (orbitActive) return false;  // 整批公转还在飞：这一拍让给选区，避免同一个元件被两套旋转同时改角度
+  const el = findElementAtPointer();
+  if (el === null || el.deleting) return false;
+  const next = el.angleTarget + shortestTurnTo(el.angleTarget, dirKey * 90);
+  if (next === el.angleTarget) return true;  // 已经朝着这个方向：不做动作，但也不能再落到虚影上
+  el.angleTarget = next;
+  commitHistory();  // 朝向是电路的一部分（决定激光往哪边走），转一下就该占一步历史
+  sceneDirty = true;  // 角度目标变了，即使画面此刻静止也要重绘一帧把旋转动画推起来
+  return true;
+}
+
+// 公转推进：进度按固定时长走满，配缓出曲线，起步快、收尾慢，落位干脆
+function updateOrbit(dt) {
+  if (!orbitActive) return;
+  orbitP += dt / CONFIG.orbitDuration;
+  if (orbitP >= 1) { finishOrbit(); return; }
+  sceneDirty = true;  // 元件每帧都在弧线上挪位置，必须每帧重画
+}
+
+// 公转落位：把终点写回元件数据（格心、角度、离散朝向），再让阻挡图按新位置重算
+// 动画期间只改画面不改数据，所以落位这一刻才是激光真正跟着转的一刻
+// 这里不顶掉落点上的其他元件：选区还在，元件仍算离地，等选区结束那一刻才统一落位
+function finishOrbit() {
+  const total = orbitTurns * 90;
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.orbitU0 === null) continue;
+    // 落点先按精确位置算，再吸附回最近的格心：轴心在半格上时这一步会把整批平移半格
+    const p = orbitPoint(el.orbitU0, el.orbitV0, total);
+    el.wx = Math.round(p.u) + 0.5;
+    el.wy = Math.round(p.v) + 0.5;
+    el.angle = el.orbitAngle0 + total;
+    el.angleTarget = el.angle;
+    el.dir = ((Math.round(el.angle / 90) % 4) + 4) % 4;  // 离散朝向跟着落位角度走，激光逻辑读的是它
+    el.orbitU0 = null;
+    el.orbitV0 = null;
+    el.orbitShiftU = 0;
+    el.orbitShiftV = 0;
+  }
+  orbitActive = false;
+  orbitP = 0;
+  orbitTurns = 0;
+  rayGraph.dirty = true;  // 位置与朝向都变了，阻挡图和激光场必须重算
+  sceneDirty = true;
+}
+
+// 把某个格号绕轴心旋转指定角度，返回旋转后的精确位置（可能落在半格上，不做取整）
+// 角度永远是 90 的整数倍，这里用精确的 0/±1 代替 cos/sin：浮点算出的 cos90° 是 6.1e-17 而不是 0，
+// 会让恰好卡在半格边界上的结果多出 ±1e-17，Math.round 在 .5 处就会朝两边乱跳，整批形状被撕开
+function orbitPoint(u, v, angleDeg) {
+  const k = ((Math.round(angleDeg / 90) % 4) + 4) % 4;  // 归一化成四个象限，绕几圈都只看余数
+  const c = [1, 0, -1, 0][k];  // cos(k×90°) 的精确值
+  const s = [0, 1, 0, -1][k];  // sin(k×90°) 的精确值
+  const du = u - orbitPivotU;
+  const dv = v - orbitPivotV;
+  return { u: orbitPivotU + du * c + dv * s, v: orbitPivotV - du * s + dv * c };
+}
+
+// 画拉框：半透明填充加一圈实线，直接用屏幕坐标画，不参与相机变换
+function drawMarquee() {
+  if (!marqueeActive) return;
+  const x = Math.min(marqueeStartSX, marqueeEndSX);
+  const y = Math.min(marqueeStartSY, marqueeEndSY);
+  const w = Math.abs(marqueeEndSX - marqueeStartSX);
+  const h = Math.abs(marqueeEndSY - marqueeStartSY);
+  ctx.save();
+  ctx.fillStyle = COLOR.selectFill;
+  ctx.fillRect(x, y, w, h);
+  ctx.lineWidth = CONFIG.marqueeWidth;
+  ctx.strokeStyle = COLOR.selectBorder;
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+}
+
+/* ========== 虚影 ========== */
+
+// 建虚影节点：路径取当前选中的类型，整体降低不透明度表示「尚未放置」；虚影不接收指针事件
+function createGhostNode() {
+  const node = createElementNode(selectedTypeId(), CONFIG.ghostOpacity);
+  node.setAttribute("pointer-events", "none");
+  return node;
+}
+
+// 把虚影形状换成当前选中的类型：切换选项槽时调用，虚影立即变成手上的那个元件
+function applyGhostType() {
+  if (ghostNode === null) return;
+  const typeId = selectedTypeId();
+  if (typeId === null) return;   // 选中工具没有形状可换，此刻虚影也是收起的，保留原路径即可
+  ghostNode.setAttribute("d", elementPathD(typeId));
+}
+
+// 每帧更新虚影：先从指针位置重算目标格心（相机可能正在平移缩放），再按「可放置 / 不可放置」两条分支推进
+function updateGhost(dt) {
+  // 指针不在画布内、或跑到视口外时立刻隐藏，也不做「进不去」动画
+  if (!pointerInside || !isInViewport(pointerSX, pointerSY)) {
+    ghostVisible = false;
+    ghostRejectActive = false;
+    ghostAlpha = 0;
+    return;
+  }
+  // 手上拿的是选中工具时没有元件要预览，虚影直接收起，同样不走「进不去」动画
+  if (selectedTypeId() === null) {
+    ghostVisible = false;
+    ghostRejectActive = false;
+    ghostAlpha = 0;
+    return;
+  }
+  const wx = cellCenterX(screenToWorldX(pointerSX));
+  const wy = cellCenterY(screenToWorldY(pointerSY));
+
+  // 分支一：目标格可放置 —— 淡入并向格心平滑靠近，同时取消可能还在走的「进不去」动画
+  if (findElementAt(wx, wy) === null) {
+    ghostRejectActive = false;
+    ghostTWX = wx;
+    ghostTWY = wy;
+    // 从隐藏变为显示时直接落到目标格，避免虚影从上一个位置飞过来
+    if (!ghostVisible) {
+      ghostWX = ghostTWX;
+      ghostWY = ghostTWY;
+    }
+    ghostVisible = true;
+    const k = 1 - Math.exp(-CONFIG.ghostLambda * dt);
+    ghostWX += (ghostTWX - ghostWX) * k;
+    ghostWY += (ghostTWY - ghostWY) * k;
+    // 和相机一样做吸附，否则虚影会在格心附近永远做亚像素漂移
+    if (Math.abs(ghostTWX - ghostWX) < CONFIG.ghostSettle) ghostWX = ghostTWX;
+    if (Math.abs(ghostTWY - ghostWY) < CONFIG.ghostSettle) ghostWY = ghostTWY;
+    const kf = 1 - Math.exp(-CONFIG.ghostFadeInLambda * dt);
+    ghostAlpha += (1 - ghostAlpha) * kf;
+    // 指数平滑逼近而不到达，到达端直接吸附，避免永远留一丝透明
+    if (ghostAlpha > 0.998) ghostAlpha = 1;
+    return;
+  }
+
+  // 分支二：目标格不可放置 —— 一边朝那一格格心移动一边消失，表示这一格进不去
+  // 位移与透明度共用同一条缓动进度，所以「位移走到一半」与「透明度归零」仍是同一时刻
+  if (!ghostRejectActive || ghostRejectToWX !== wx || ghostRejectToWY !== wy) {
+    // 首次进入、或鼠标又滑到另一个不可放置格：都从当前位置重新起算，透明度才不会跳变
+    ghostRejectActive = true;
+    ghostRejectP = 0;
+    ghostRejectStartAlpha = ghostAlpha;
+    ghostRejectFromWX = ghostWX;
+    ghostRejectFromWY = ghostWY;
+    ghostRejectToWX = wx;
+    ghostRejectToWY = wy;
+  }
+  ghostVisible = false;
+  // 进度按固定时长推进，帧率不同也走同样长的时间
+  ghostRejectP = Math.min(1, ghostRejectP + dt / CONFIG.ghostRejectDuration);
+  // 缓动值同时喂给位置和透明度：位移走完一半距离时，缓动值正好 0.5，透明度也正好归零
+  const e = easeOutExpo(ghostRejectP);
+  ghostWX = ghostRejectFromWX + (ghostRejectToWX - ghostRejectFromWX) * e;
+  ghostWY = ghostRejectFromWY + (ghostRejectToWY - ghostRejectFromWY) * e;
+  // 乘起始系数是为了中途换格时不闪一下
+  ghostAlpha = ghostRejectStartAlpha * Math.max(0, 1 - 2 * e);
+  if (ghostAlpha < 0.002) ghostAlpha = 0;
+}
+
+// 求「从当前角度拨到某个朝向」所需的最小增量，结果落在 (-180, 180]
+// 角度是连续累积的，所以不能直接赋绝对值；这里只算最近的那条路，避免按反方向键时顺着累积角度绕一大圈
+function shortestTurnTo(curAngle, dirAngle) {
+  let delta = (dirAngle - (curAngle % 360)) % 360;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  return delta;
+}
+
+// 把数字键的键位码解析成从 0 开始的槽序号，主键盘与小键盘都认；不是 1~9 就返回 -1
+// 用键位码而不是键名，同样是为了避开中文输入法把字母与数字变成 "Process" 的情况
+function digitKeyIndex(code) {
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(code);
+  return m === null ? -1 : Number(m[1]) - 1;
+}
+
+// 每帧把虚影朝向的角度推向目标角度：指数收敛（先快后慢），停下后吸附并归一化
+function updateGhostRotation(dt) {
+  const k = 1 - Math.exp(-CONFIG.rotateLambda * dt);
+  ghostAngle += (ghostAngleTarget - ghostAngle) * k;
+  // 指数平滑永远逼近而不到达，误差足够小就直接吸附，避免长期停在零点几度的残差上
+  if (Math.abs(ghostAngleTarget - ghostAngle) < CONFIG.rotateSettle) {
+    ghostAngle = ghostAngleTarget;
+    // 停下后把两者一起对 360 取模：此刻两者是同一个角度，同时取模不会让画面跳变，又能防止数值无限增大
+    ghostAngle = ghostAngle % 360;
+    ghostAngleTarget = ghostAngleTarget % 360;
+  }
+}
+
+// 每帧把每个元件的角度推向它自己的目标角度：与虚影同一套收敛和归一化，手感保持一致
+function updateElementRotations(dt) {
+  const k = 1 - Math.exp(-CONFIG.rotateLambda * dt);
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    // 已经静止的元件直接跳过，省掉每帧的无谓计算
+    if (el.angle === el.angleTarget) continue;
+    el.angle += (el.angleTarget - el.angle) * k;
+    if (Math.abs(el.angleTarget - el.angle) < CONFIG.rotateSettle) {
+      el.angle = el.angleTarget;
+      // 停下后归一化角度，并把离散朝向索引同步成最终朝向，供后续激光逻辑读取
+      el.angle = el.angle % 360;
+      el.angleTarget = el.angleTarget % 360;
+      el.dir = ((Math.round(el.angleTarget / 90) % 4) + 4) % 4;
+      rayGraph.dirty = true;  // 朝向变了，全局阻挡属性可能随之在水平/垂直之间互换
+    }
+  }
+}
+
+// 每帧推进所有元件的选中缓动：目标由「是否被选中」决定，固定时长走缓出曲线，很快但不生硬
+// 正在删除的元件目标直接归零，跟着淡出一起退回常态配色，不会留下半亮的样子
+function updateSelectionAnim(dt) {
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    stepEased(el.selP, el.selected && !el.deleting ? 1 : 0, dt, CONFIG.selectAnimDuration);
+  }
+}
+
+// 每帧推进所有灯的亮起缓动：目标由「本微帧有没有被激光照到」决定，固定时长走缓出曲线
+// 正在删除的灯目标直接归零，跟着淡出一起退回常态，不会留下半亮的残影
+// 灯以外的元件直接跳过，省掉每帧一次无谓的 stepEased
+function updateLampAnim(dt) {
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.typeId !== "lamp") continue;
+    stepEased(el.litP, el.litIn && !el.deleting ? 1 : 0, dt, CONFIG.lampAnimDuration);
+  }
+}
+
+// 每帧推进拖动缓动：把元件的视觉偏移按指数缓出收回到 0，元件平滑滑向数据所在的格心
+// 用指数收敛而不是固定时长：连续跨格时每一步都从当前偏移接着走，快拖不会一顿一顿，慢拖也跟得住
+function updateMoveAnim(dt) {
+  const k = 1 - Math.exp(-CONFIG.moveLambda * dt);
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.mvOffU === 0 && el.mvOffV === 0) continue;  // 已经归零的直接跳过，省掉每帧的无谓计算
+    el.mvOffU *= 1 - k;
+    el.mvOffV *= 1 - k;
+    // 残差小于阈值就直接归零：指数收敛永远到不了 0，不吸附的话画面会一直停着一丝抖动
+    if (Math.abs(el.mvOffU) < CONFIG.moveSettle) el.mvOffU = 0;
+    if (Math.abs(el.mvOffV) < CONFIG.moveSettle) el.mvOffV = 0;
+    sceneDirty = true;  // 视觉位置每帧都在变，必须重绘
+  }
+}
+
+// 每帧把虚影摆到屏幕上；完全透明时直接隐藏节点，连 transform 都不用算
+function renderGhost() {
+  if (ghostNode === null) return;
+  if (ghostAlpha <= 0) {
+    ghostNode.style.display = "none";
+    return;
+  }
+  ghostNode.style.display = "";
+  // ghostOpacity 是虚影的不透明度上限，实际透明度再乘上淡入淡出系数
+  ghostNode.setAttribute("opacity", CONFIG.ghostOpacity * ghostAlpha);
+  // 用动画中的连续角度：旋转过程中虚影是斜着的，转到位才正对格子
+  ghostNode.setAttribute("transform", elementTransform(ghostWX, ghostWY, ghostAngle, 1));
+}
+
+// 初始化元件层：建裁剪路径，再建虚影节点（虚影要盖在已放置元件之上）
+function initElementLayer() {
+  elemLayer = document.getElementById("elemLayer");
+  const clipPath = document.createElementNS(SVG_NS, "clipPath");
+  clipPath.setAttribute("id", "viewportClip");
+  clipRect = document.createElementNS(SVG_NS, "rect");
+  clipPath.appendChild(clipRect);
+  elemLayer.appendChild(clipPath);
+  elemLayer.setAttribute("clip-path", "url(#viewportClip)");
+  resizeElementLayer();
+  // 虚影放在已放置元件之后，保证它画在最上层
+  ghostNode = createGhostNode();
+  elemLayer.appendChild(ghostNode);
+}
+
+/* ========== 调试面板 ========== */
+
+// 调试面板默认隐藏，避免干扰正常界面；需要时在控制台执行 debugPanel.show() 唤出
+let debugPanelEl = null;      // HTMLElement：调试面板根节点
+let debugPanelVisible = false; // boolean：面板当前是否可见
+
+// 统一设置面板可见性：内联 display 覆盖 CSS 里的默认隐藏
+function setDebugPanelVisible(visible) {
+  debugPanelVisible = visible;
+  debugPanelEl.style.display = visible ? "block" : "none";
+}
+
+// 对外接口：以后往面板里加别的调试控件（不限于 HSL）也从这个对象进出
+window.debugPanel = {
+  show: function () { setDebugPanelVisible(true); },
+  hide: function () { setDebugPanelVisible(false); },
+  toggle: function () { setDebugPanelVisible(!debugPanelVisible); }
+};
+
+// 底板配色的 HSL 编辑器入口：唤出的就是上面这个调试面板，底板那组滑块在里面
+// 单开一个入口是因为底板色属于界面而不是元件，调用点上写 panelColor.show() 比 debugPanel.show() 更明确
+window.panelColor = {
+  show: function () { setDebugPanelVisible(true); },
+  hide: function () { setDebugPanelVisible(false); },
+  toggle: function () { setDebugPanelVisible(!debugPanelVisible); }
+};
+
+// 把 HSL 三元组转成 CSS 颜色字符串；SVG 的 fill/stroke 直接接受 hsl() 写法
+function hslCss(c) {
+  return "hsl(" + c.h + ", " + c.s + "%, " + c.l + "%)";
+}
+
+// 两个 HSL 三元组按 k 线性混合（0 取 a，1 取 b），返回 CSS 的 hsl() 写法
+// 供选中缓动使用：逐通道插值，色相只在本体与选中之间小幅平移，不会跨越 0 度而绕远路
+function mixHsl(a, b, k) {
+  return "hsl(" + (a.h + (b.h - a.h) * k) + ", " +
+    (a.s + (b.s - a.s) * k) + "%, " +
+    (a.l + (b.l - a.l) * k) + "%)";
+}
+
+// 同上的混合，但返回三元组本身而不是 CSS 写法：需要连着混两次（先按亮起、再按选中）时用它
+// k 为 0 时返回的是 a 的副本，逐通道都加了 0，数值与 a 完全一致，不会给没参与混合的元件带来偏差
+function mixHslTriple(a, b, k) {
+  return {
+    h: a.h + (b.h - a.h) * k,
+    s: a.s + (b.s - a.s) * k,
+    l: a.l + (b.l - a.l) * k
+  };
+}
+
+// 把 HSL 三元组换算成 0-255 的 RGB：灯的亮起改用 RGB 逐通道混合，先把两端颜色取成 RGB 备用
+// 标准换算：先由饱和度与亮度定出色度，再按色相落到六个扇区之一取出三分量，最后按亮度补正
+function hslToRgb(c) {
+  const s = c.s / 100;
+  const l = c.l / 100;
+  const k = (1 - Math.abs(2 * l - 1)) * s;        // 色度：饱和度越高、越远离全黑全白就越大
+  const hp = (((c.h % 360) + 360) % 360) / 60;    // 色相归一化到 0-6，落在哪个扇区就取哪组分量
+  const x = k * (1 - Math.abs((hp % 2) - 1));     // 扇区内的过渡分量
+  let r = 0, g = 0, b = 0;
+  if (hp < 1) { r = k; g = x; }
+  else if (hp < 2) { r = x; g = k; }
+  else if (hp < 3) { g = k; b = x; }
+  else if (hp < 4) { g = x; b = k; }
+  else if (hp < 5) { r = x; b = k; }
+  else { r = k; b = x; }
+  const m = l - k / 2;                            // 亮度补正：把算出的分量整体抬到目标亮度
+  return { r: (r + m) * 255, g: (g + m) * 255, b: (b + m) * 255 };
+}
+
+// 两个 RGB 颜色按 k 线性混合（0 取 a，1 取 b）：逐通道插值，不经过色相环，所以不会串出无关颜色
+// 灯的亮起就等于「在灯上盖一层淡红遮罩并把遮罩的不透明度从 0 拉到 1」，这个式子正是那层遮罩的混合结果
+function mixRgb(a, b, k) {
+  return {
+    r: a.r + (b.r - a.r) * k,
+    g: a.g + (b.g - a.g) * k,
+    b: a.b + (b.b - a.b) * k
+  };
+}
+
+// RGB 三元组转成 CSS 颜色字符串；在这里统一取整，混合过程保留小数，避免连续过渡时逐帧累积误差
+function rgbCss(c) {
+  return "rgb(" + Math.round(c.r) + ", " + Math.round(c.g) + ", " + Math.round(c.b) + ")";
+}
+
+// 把配色朝白色提亮 k（0 原色、1 全白）：只抬亮度、顺手压一点饱和度，色相不动
+// 这样不管用户把设置按钮调成什么颜色，亮态都还是同一个色系，不会变成另一种颜色
+function hslLit(c, k) {
+  const l = c.l + (100 - c.l) * k;
+  const s = c.s * (1 - k * 0.25);
+  return "hsl(" + c.h + ", " + s + "%, " + l + "%)";
+}
+
+// 把一组配色写到面板里对应的色块与色值文本上；group 是 paletteUI 里的那一组 DOM 引用
+function refreshSwatch(group, c) {
+  const css = hslCss(c);
+  group.sw.style.background = css;
+  group.code.textContent = css;
+}
+
+// 把元件配色写到所有已放置的元件上；元件配色是固定的，只在初始化与重开时刷一次
+function applyElementColors() {
+  const fillCss = hslCss(elementHSL.fill);
+  const strokeCss = hslCss(elementHSL.stroke);
+  for (let i = 0; i < elements.length; i++) {
+    elements[i].node.setAttribute("fill", fillCss);
+    elements[i].node.setAttribute("stroke", strokeCss);
+    // 缓存键作废：这里直接写了常态色，若缓存还留着旧进度，下一帧会以为配色没变而跳过重写
+    elements[i].litK = -1;
+  }
+  sceneDirty = true;  // 配色变了要重绘；否则静止判定会认为画面没变，颜色改了也不显示
+}
+
+// 把元件那两组沙盒配色写到面板里的色块与色值文本；元件实际颜色固定取 elementHSL，这里只刷新显示
+function refreshElementColorUI() {
+  if (paletteUI === null) return;
+  refreshSwatch(paletteUI.fill, elementSandbox.fill);
+  refreshSwatch(paletteUI.stroke, elementSandbox.stroke);
+}
+
+// 把一组 H/S/L 滑块接到一个配色对象上：target 直接是 {h,s,l}，prefix 是这组滑块的 id 前缀
+// onChange 在每次拖动后调用；现在八组接的都是沙盒，所以它只负责把新值刷到面板显示上
+function bindHSLGroup(target, prefix, onChange) {
+  const parts = ["h", "s", "l"];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const slider = document.getElementById(prefix + part.toUpperCase());
+    // 滑块初值取当前配色，保证面板显示和实际颜色一致
+    slider.value = target[part];
+    // input 事件在拖动过程中连续触发，配色实时跟随
+    slider.addEventListener("input", function () {
+      target[part] = Number(slider.value);
+      onChange();
+    });
+  }
+}
+
+// 把沙盒配色写到面板里的色块与色值文本；底板实际颜色取 COLOR.panelFill，这里只刷新显示
+function refreshPanelColorUI() {
+  if (paletteUI === null) return;
+  refreshSwatch(paletteUI.panel, panelHSL);
+}
+
+// 把槽填充的沙盒配色写到面板里的色块与色值文本；槽实际填充取 COLOR.slotFill，这里只刷新显示
+function refreshSlotColorUI() {
+  if (paletteUI === null) return;
+  refreshSwatch(paletteUI.slot, slotHSL);
+}
+
+// 把设置那四组沙盒配色写到面板里的色块与色值文本；画面颜色固定取 settingsHSL，这里只刷新显示
+// 所以拖这四组滑块不会改动画面上任何东西，纯粹是取色参考
+function refreshSettingsColorUI() {
+  if (paletteUI === null) return;
+  refreshSwatch(paletteUI.gearFill, settingsSandbox.gearFill);
+  refreshSwatch(paletteUI.gearStroke, settingsSandbox.gearStroke);
+  refreshSwatch(paletteUI.setFill, settingsSandbox.slotFill);
+  refreshSwatch(paletteUI.setStroke, settingsSandbox.slotStroke);
+}
+
+// 初始化调试面板：缓存根节点与色块引用、绑定四组滑块、同步一次显示（面板保持隐藏）
+function setupDebugPanel() {
+  debugPanelEl = document.getElementById("debugPanel");
+  paletteUI = {
+    fill: {
+      sw: document.getElementById("swFill"),
+      code: document.getElementById("codeFill")
+    },
+    stroke: {
+      sw: document.getElementById("swStroke"),
+      code: document.getElementById("codeStroke")
+    },
+    panel: {
+      sw: document.getElementById("swPanel"),
+      code: document.getElementById("codePanel")
+    },
+    slot: {
+      sw: document.getElementById("swSlot"),
+      code: document.getElementById("codeSlot")
+    },
+    gearFill: {
+      sw: document.getElementById("swGearFill"),
+      code: document.getElementById("codeGearFill")
+    },
+    gearStroke: {
+      sw: document.getElementById("swGearStroke"),
+      code: document.getElementById("codeGearStroke")
+    },
+    setFill: {
+      sw: document.getElementById("swSetFill"),
+      code: document.getElementById("codeSetFill")
+    },
+    setStroke: {
+      sw: document.getElementById("swSetStroke"),
+      code: document.getElementById("codeSetStroke")
+    }
+  };
+  // 面板里八组滑块现在全是取色沙盒：拖动只改色块与色值文本，画面颜色一律取各自的固定配色
+  bindHSLGroup(elementSandbox.fill, "fill", refreshElementColorUI);
+  bindHSLGroup(elementSandbox.stroke, "stroke", refreshElementColorUI);
+  bindHSLGroup(panelHSL, "panel", refreshPanelColorUI);
+  bindHSLGroup(slotHSL, "slot", refreshSlotColorUI);
+  bindHSLGroup(settingsSandbox.gearFill, "gearFill", refreshSettingsColorUI);
+  bindHSLGroup(settingsSandbox.gearStroke, "gearStroke", refreshSettingsColorUI);
+  bindHSLGroup(settingsSandbox.slotFill, "setFill", refreshSettingsColorUI);
+  bindHSLGroup(settingsSandbox.slotStroke, "setStroke", refreshSettingsColorUI);
+  applyElementColors();
+  refreshElementColorUI();
+  refreshPanelColorUI();
+  refreshSlotColorUI();
+  refreshSettingsColorUI();
+}
+
+/* ========== 更新与渲染 ========== */
+
+// 用指数平滑把参考点屏幕位置与缩放推向目标值，dt 参与计算保证不同帧率下速度一致
+function updateCamera(dt) {
+  const k = 1 - Math.exp(-CONFIG.smoothLambda * dt);
+  state.logScale += (state.tLogScale - state.logScale) * k;
+  state.anchorSX += (state.tAnchorSX - state.anchorSX) * k;
+  state.anchorSY += (state.tAnchorSY - state.anchorSY) * k;
+  // 指数平滑永远逼近而不到达，静止后会一直做亚像素漂移；误差足够小就直接吸附，画面彻底静下来
+  if (Math.abs(state.tAnchorSX - state.anchorSX) < CONFIG.settlePx) state.anchorSX = state.tAnchorSX;
+  if (Math.abs(state.tAnchorSY - state.anchorSY) < CONFIG.settlePx) state.anchorSY = state.tAnchorSY;
+  if (Math.abs(state.tLogScale - state.logScale) < CONFIG.settleLogEps) state.logScale = state.tLogScale;
+  // 缩放按对数插值，等比例变化看起来才均匀
+  state.scale = Math.exp(state.logScale);
+}
+
+// 判断场景是否完全静止：相机、选项槽、简介浮层、元件动画、虚影全都停下
+// 全停下就说明画面不会再变，主循环可以整帧跳过渲染，空闲时占用降到接近零
+function isSceneSettled() {
+  // 相机：吸附后当前值与目标值相等，不等就说明还在平移或缩放
+  if (state.anchorSX !== state.tAnchorSX || state.anchorSY !== state.tAnchorSY) return false;
+  if (state.logScale !== state.tLogScale) return false;
+  // 选项槽的缩放缓动：任一槽没停稳就还在动
+  for (let i = 0; i < slotAnim.length; i++) {
+    if (slotAnim[i].t < 1) return false;
+  }
+  // 两个按钮的提亮：它们的缩放已经在上面那轮槽里查过了，这里只需补上提亮，否则动画会卡在半路
+  if (settingsLitAnim.t < 1) return false;
+  if (fileLitAnim.t < 1) return false;
+  if (tutorialLitAnim.t < 1) return false;  // 教程按钮的提亮同样要查，否则动画会卡在半路不动
+  if (tutorialModalAnim.t < 1) return false;  // 教程弹窗的淡入淡出也要查，否则窗口会卡在半透明或停在没显示出来的状态
+  // 简介浮层：动画没走完就还在动
+  if (tipAnim.t < 1) return false;
+  // 元件：删除动画进行中、朝向还在转、选中缓动没走完、或拖动缓动还差一点没追上，都要继续渲染
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.deleting || el.angle !== el.angleTarget || el.selP.t < 1) return false;
+    if (el.litP.t < 1) return false;  // 灯的亮起缓动没走完就还在变，不能整帧跳过
+    if (el.mvOffU !== 0 || el.mvOffV !== 0) return false;  // 拖动缓动没归零就还在滑，不能整帧跳过
+  }
+  // 虚影：可见时位置没吸附、透明度停在半途、旋转没停，都算还在动
+  // 不可见时不检查位置，因为它此时停在「进不去」动画的终点上，本来就不等于目标格心
+  if (ghostVisible && (ghostWX !== ghostTWX || ghostWY !== ghostTWY)) return false;
+  if (ghostAlpha > 0 && ghostAlpha < 1) return false;
+  if (ghostRejectActive && ghostRejectP < 1) return false;
+  if (ghostAngle !== ghostAngleTarget) return false;
+  return true;
+}
+
+// 渲染一帧：清屏 → 画网格视口 → 画边框 → 画上方面板与底部栏 → 画选项槽 → 同步简介浮层 → 同步 SVG 元件层
+function render() {
+  const vp = getViewport();
+  // 先整体清成白底，视口外自然就是空白
+  ctx.clearRect(0, 0, state.cssW, state.cssH);
+  drawGrid(vp);
+  drawLaser(vp);  // 激光在网格之上、元件之下：元件层是独立 SVG 图层，天然压在它上面
+  drawLampGlow(vp);  // 灯光晕压在激光之上、元件之下：既能柔化照到灯上的激光，又不会盖住灯本体
+  drawViewportBorder(vp);
+  drawPanelBox(vp);
+  drawBottomBar(vp);
+  drawBottomBarHint(vp);
+  drawPanelSlots(vp);
+  renderSlotTip(vp);
+  renderPanels(vp);
+  renderTutorialPanel();  // 教程弹窗是纯 DOM 浮层，压在画布所有内容之上，所以放在最后同步
+  renderElements();
+  renderGhost();
+  drawMarquee();  // 拉框画在最后，压在画布上所有内容之上，拖到哪儿都看得见
+}
+
+/* ========== 输入处理 ========== */
+
+// 在光标位置缩放：把参考点换成光标下的世界点，再改缩放目标
+function zoomAt(screenX, screenY, factor) {
+  // 换参考点前的待走位移（平移还没走完的部分），换参考点时原样保留，避免打断正在进行的平移
+  const pendingDX = state.tAnchorSX - state.anchorSX;
+  const pendingDY = state.tAnchorSY - state.anchorSY;
+  // 纯换参考系：新参考点取光标下的世界点、屏幕位置取光标本身，这一步不改变当前画面
+  state.anchorWX = screenToWorldX(screenX);
+  state.anchorWY = screenToWorldY(screenY);
+  state.anchorSX = screenX;
+  state.anchorSY = screenY;
+  state.tAnchorSX = screenX + pendingDX;
+  state.tAnchorSY = screenY + pendingDY;
+  // 缩放目标单独推进；动画期间参考点屏幕位置不变，等于绕光标做纯缩放，屏幕位移不会过冲
+  state.tLogScale = clamp(
+    state.tLogScale + Math.log(factor),
+    Math.log(CONFIG.minScale),
+    Math.log(CONFIG.maxScale)
+  );
+}
+
+// 绑定全部输入事件；init 只执行一次，所以监听器不会被重复注册
+function setupInput() {
+  // 滚轮缩放：deltaMode 为 1 时单位是「行」，换算成像素再做指数缩放
+  canvas.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    zoomAt(e.clientX, e.clientY, Math.exp(-delta * CONFIG.wheelZoomRate));
+  }, { passive: false });
+
+  // 中键按下：阻止浏览器自动滚动，并开始拖拽视野
+  canvas.addEventListener("mousedown", function (e) {
+    if (e.button === 1) e.preventDefault();
+  });
+
+  // 右键：屏蔽浏览器右键菜单，右键在画布上的语义改成「删除指针所在格的元件」
+  canvas.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+    deleteElementAtScreen(e.clientX, e.clientY);
+  });
+
+  canvas.addEventListener("pointerdown", function (e) {
+    // 点击也算一次「进入画布」：页面加载时鼠标已在画布内的话不会触发 pointerenter，这里补上
+    pointerSX = e.clientX;
+    pointerSY = e.clientY;
+    pointerInside = true;
+    sceneDirty = true;  // 点击可能选槽、开关光源或放置元件，画面必须更新一次
+    canvas.focus();
+    // 左键：先判是不是点在选项槽上（是则选中该槽并进入按下态、不放置），否则在指针所在格心放置元件
+    if (e.button === 0) {
+      const hit = slotIndexAt(e.clientX, e.clientY);
+      if (hit >= 0) {
+        slotPressedIndex = hit;  // 按下态：只缩得更深，不改亮度，避免按下时闪一下
+        // 两个按钮只是「长得像槽」，它们不是可选项：不能改选中项，否则虚影会去查一个不存在的元件
+        // 选中槽与元件槽都能选中；从选中工具切到别的工具时，选区会被立刻收掉（元件就地落位）
+        if (isPickableSlot(hit)) setSelectedSlot(hit);
+        return;
+      }
+      // 选中工具激活时，画布上的左键一律是「选择」：按住不动是单击选中，拖动就成了拉框
+      // 这一步必须排在放置和开关光源之前，否则选中工具会被这两个操作抢走左键
+      if (selectToolActive()) {
+        // 按在「已选中」的元件上（且没按 Shift）＝拖动这一批选中的元件
+        // Shift 留给框选的翻转模式，两者不抢同一个手势；按在空处或未选中的元件上仍是拉框
+        const hitEl = findElementAtPointer();
+        if (!e.shiftKey && hitEl !== null && hitEl.selected && !hitEl.deleting) {
+          beginMove(e);
+          return;
+        }
+        beginMarquee(e);
+        return;
+      }
+      // 左键点在已占用的格子上：交给元件自己处理（目前只有光源响应，切换开关），无论成不成都不再放置
+      if (findElementAtPointer() !== null) {
+        toggleLightAtPointer();
+        return;
+      }
+      placeElementAtScreen(e.clientX, e.clientY);
+      return;
+    }
+    if (e.button !== 1) return;
+    e.preventDefault();
+    state.isPanning = true;
+    state.panPointerId = e.pointerId;
+    state.panLastX = e.clientX;
+    state.panLastY = e.clientY;
+    // 捕获指针：指针移出画布甚至移出窗口也能继续收到 move 事件
+    canvas.setPointerCapture(e.pointerId);
+  });
+
+  // 拖拽中：自己用前后 clientX/clientY 求位移，不用 movementX —— 后者在部分浏览器里会跳变，拖起来一抖一抖
+  canvas.addEventListener("pointermove", function (e) {
+    // 无论是否在拖拽都记录指针位置：虚影每帧据此重算目标格心，平移缩放时也能跟着更新
+    pointerSX = e.clientX;
+    pointerSY = e.clientY;
+    pointerInside = true;
+    sceneDirty = true;  // 指针位置变了，虚影与槽悬停都可能跟着变，强制重绘一次
+    // 同步选项槽的悬停状态：命中判定与绘制共用 panelSlotRect，两边不会算歪
+    updateSlotHoverAt(e.clientX, e.clientY);
+    moveMarquee(e);  // 拉框与拖视野是两个互斥的指针操作，各认各的指针 id，互不干扰
+    moveSelectionDrag(e);  // 拖动选中元件同理，也是各认各的指针 id
+    if (!state.isPanning || e.pointerId !== state.panPointerId) return;
+    const dx = e.clientX - state.panLastX;
+    const dy = e.clientY - state.panLastY;
+    state.panLastX = e.clientX;
+    state.panLastY = e.clientY;
+    // 平移只动参考点的屏幕位置，世界坐标不动，整个画面跟着屏幕位移走
+    state.tAnchorSX += dx;
+    state.tAnchorSY += dy;
+  });
+
+  // 指针进入画布：立刻记录位置并抢下键盘焦点，否则页面/iframe 未获得焦点时按 WASD 收不到 keydown
+  canvas.addEventListener("pointerenter", function (e) {
+    pointerSX = e.clientX;
+    pointerSY = e.clientY;
+    pointerInside = true;
+    canvas.focus();
+    sceneDirty = true;  // 指针可能正好从槽上进入画布，槽的悬停状态与虚影都要立刻反映出来
+    // 这里也判一次槽的悬停，避免要等第一次移动才生效
+    updateSlotHoverAt(e.clientX, e.clientY);
+  });
+
+  // 指针离开画布：标记为不在画布内，虚影随之隐藏
+  canvas.addEventListener("pointerleave", function () {
+    pointerInside = false;
+    sceneDirty = true;  // 虚影要消失、槽要复位，这些变化必须重绘一次才看得到
+    // 离开画布也要清掉槽的悬停与按下，否则槽会一直停在缩小状态回不去
+    slotHoverIndex = -1;
+    slotPressedIndex = -1;
+    slotHoverTime = 0;  // 停留计时一并归零，重新进入时要重新数 1.4 秒
+  });
+
+  // 结束拖拽：释放捕获并清空拖拽状态
+  canvas.addEventListener("pointerup", function (e) {
+    // 设置按钮：松开时指针仍停在按钮上才算一次有效点击（按下后拖走再松手不算）
+    // 只切换设置自己的开合状态，不去开合调试面板 —— 那个面板是调参用的，跟设置是两回事
+    if (slotPressedIndex === SETTINGS_SLOT_INDEX && slotHoverIndex === SETTINGS_SLOT_INDEX) {
+      settingsOpen = !settingsOpen;
+      filePanelOpen = false;  // 弹窗互斥：开一个就把另外两个关掉，避免底板叠在一起、也保证同时只有一个按钮亮着
+      tutorialOpen = false;
+    }
+    // 文件按钮：判定规则与设置按钮完全一致，同样是「按下又松开在同一按钮上」才算一次点击
+    if (slotPressedIndex === FILE_SLOT_INDEX && slotHoverIndex === FILE_SLOT_INDEX) {
+      filePanelOpen = !filePanelOpen;
+      settingsOpen = false;   // 同上，反向互斥
+      tutorialOpen = false;
+    }
+    // 教程按钮：判定规则同前两个按钮，按下又松开在同一按钮上才算一次点击
+    // 打开时屏幕正中弹出教程窗口；一并把另外两个弹窗关掉，三个按钮同一时刻只有一个亮着
+    if (slotPressedIndex === TUTORIAL_SLOT_INDEX && slotHoverIndex === TUTORIAL_SLOT_INDEX) {
+      tutorialOpen = !tutorialOpen;
+      settingsOpen = false;
+      filePanelOpen = false;
+    }
+    slotPressedIndex = -1;  // 不论哪个键松开都退出按下态，所以放在提前 return 之前
+    // 拉框收尾放在最前：松开左键必须把拉框结掉，否则框会一直挂在屏幕上
+    if (e.pointerId === marqueePointerId) endMarquee(e);
+    if (e.pointerId === movePointerId) endMove(e);  // 拖动收尾：清落点被覆盖的元件并复位状态
+    if (e.pointerId !== state.panPointerId) return;
+    endPan(e.pointerId);
+  });
+
+  // 指针被系统取消（如触控被中断）时也要收尾，否则会卡在拖拽态或按下态
+  canvas.addEventListener("pointercancel", function (e) {
+    slotPressedIndex = -1;  // 系统取消不算一次点击，只退出按下态
+    if (e.pointerId === marqueePointerId) cancelMarquee(e);  // 拉框也要一并收掉，否则框会留在屏幕上
+    if (e.pointerId === movePointerId) cancelMove(e);  // 拖动被系统打断：元件退回原位再收状态
+    if (e.pointerId !== state.panPointerId) return;
+    endPan(e.pointerId);
+  });
+
+  // 窗口尺寸变化：画布与元件层都要重新按新尺寸对齐
+  window.addEventListener("resize", function () {
+    resizeCanvas();
+    resizeElementLayer();
+    sceneDirty = true;  // 画布尺寸变了，整屏内容都要按新尺寸重画
+  });
+
+  // 标签页切回来时画布内容可能已被系统丢弃，强制重绘一次，避免留下一片空白
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) sceneDirty = true;
+  });
+
+  // 粘贴：只在这里挂一次，挂在 document 上而不是画布上——焦点落在哪个元素都能收到
+  // 不用「读剪贴板」的接口，是因为它要授权、在本地文件下不可靠；粘贴事件由浏览器把内容直接递过来
+  document.addEventListener("paste", onPaste);
+
+  // 键盘：1/2/3/4… 直接选中对应序号的元件槽；WASD 把朝向直接拨到上、右、下、左
+  // WASD 优先作用于选区：有选中元件时整批一起转；没有选区才落到指针悬停的元件上，再没有就转虚影
+  // 判据用 e.code 而不是 e.key：中文输入法激活时 e.key 会变成 "Process"，字母键会被整个吞掉
+  window.addEventListener("keydown", function (e) {
+    // 教程窗口开着时，画布的快捷键一律不响应，只留 Esc 把它关掉
+    // 放在最前面拦：它是模态窗口，在它前面按 WASD 不该把后面被挡住的元件转了
+    if (tutorialOpen) {
+      if (e.code === "Escape") tutorialOpen = false;  // Esc 是关模态窗口的通用习惯，顺手支持一下
+      return;
+    }
+    // Cmd+S / Ctrl+S：保存。放在最前面拦，因为这是全局快捷键，与指针在不在画布上无关
+    // 必须拦掉默认行为，否则浏览器会弹「保存网页」的框，把页面本身存成一个文件
+    // 用键位码而不是键名，避免中文输入法把键名改掉；Mac 认 Cmd，其它平台认 Ctrl
+    if (e.code === "KeyS" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      onSaveFile();
+      return;
+    }
+    // Cmd+C / Ctrl+C：复制选区。与保存一样是全局快捷键，与指针在不在画布上无关
+    // 这里只管复制；粘贴不在这里做，改由系统的粘贴事件接手，那条路才能拿到剪贴板里的文本
+    if (e.code === "KeyC" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      copySelection();
+      return;
+    }
+    // Cmd+Z / Ctrl+Z：撤销；带上 Shift 就是重做，与 Windows 上 Ctrl+Shift+Z 的习惯一致
+    // 同样是全局快捷键，与指针在不在画布上无关；手上有悬空时由撤销自己先把它取消掉
+    if (e.code === "KeyZ" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+      return;
+    }
+    // Ctrl+Y：Windows 上另一套常用的重做键位，与 Ctrl+Shift+Z 等价，一并认下
+    if (e.code === "KeyY" && e.ctrlKey) {
+      e.preventDefault();
+      redo();
+      return;
+    }
+    // 反引号 `：切到选中工具（选中模式），与点第一个槽等价，不用鼠标也能进出选择
+    // 只负责「切进去」：要退出就点别的槽或按数字键选元件，那两种路径会立刻把选区收掉
+    if (e.code === "Backquote") {
+      e.preventDefault();
+      setSelectedSlot(SELECT_SLOT_INDEX);
+      sceneDirty = true;  // 选中高亮与手上虚影都变了，静止时也得重绘一帧才看得到
+      return;
+    }
+    // 数字键与鼠标点槽等价：只改选中项并换掉手上的虚影，不进入按下态（键盘没有按住不放这回事）
+    // 上限取元件类型数量，所以以后往面板里加元件，数字键自然跟着往后扩，不必改这里
+    const digit = digitKeyIndex(e.code);
+    if (digit >= 0) {
+      if (digit < PANEL_SLOT_TYPES.length) {
+        e.preventDefault();
+        setSelectedSlot(digit + ELEMENT_SLOT_BASE);   // 数字从 1 数起，加基准才是槽序号，1 仍对应第一个元件类型
+        // 选中高亮是画在画布上的：不标脏的话，静止时这一帧会被整帧跳过，上面看着像没反应
+        sceneDirty = true;
+      }
+      return;
+    }
+    // Delete：有选区时删掉整个选区，没有选区时才删指针所在格的元件（与右键点它等价）
+    // 同时认 Backspace：MacBook 键盘上那个标着 delete 的键发出来的就是 Backspace，只认 Delete 的话按下去没反应
+    if (e.code === "Delete" || e.code === "Backspace") {
+      // 无条件拦下默认行为：Backspace 在浏览器里默认是「后退」，不拦会直接把页面退走
+      e.preventDefault();
+      // 有选区时删整个选区：删哪些元件由选区决定，与指针停在哪里无关，所以指针在画布外也照删
+      if (deleteSelection()) return;
+      // 没有选区才回到老行为：删指针所在格的元件
+      // 指针已经离开画布时不响应：位置还停在最后一次进入画布的地方，照做会误删
+      if (pointerInside) deleteElementAtScreen(pointerSX, pointerSY);
+      return;
+    }
+    // Enter：在指针所在格放置手上选中的元件，与左键点空格完全等价
+    // 小键盘的回车键位码不同，一并认下，否则小键盘按了没反应
+    if (e.code === "Enter" || e.code === "NumpadEnter") {
+      if (pointerInside) {
+        e.preventDefault();
+        placeElementAtScreen(pointerSX, pointerSY);
+      }
+      return;
+    }
+    const dirKey = DIR_KEYS[e.code];  // undefined 表示不是 WASD，注意朝向索引 0 是合法值，不能拿它判空
+    if (dirKey === undefined) return;
+    e.preventDefault();
+    // 顺位一：有选中的元件就整批一起转，不再看指针停在哪个元件上
+    if (rotateSelectionToDir(dirKey)) return;
+    // 顺位二：没有选区、但指针正悬停在某个元件上，就转那个元件本身
+    if (rotateHoveredElement(dirKey)) return;
+    // 顺位三：都没有才转虚影；此时改的是手上元件的朝向，与指针是否压着元件无关
+    ghostAngleTarget += shortestTurnTo(ghostAngleTarget, dirKey * 90);
+  });
+}
+
+// 统一收尾拖拽：释放指针捕获并复位拖拽相关状态
+function endPan(pointerId) {
+  if (canvas.hasPointerCapture(pointerId)) {
+    canvas.releasePointerCapture(pointerId);
+  }
+  state.isPanning = false;
+  state.panPointerId = null;
+}
+
+/* ========== 重置 ========== */
+
+// 把视图与输入状态全部复位到初始值，等价于「重开一局」
+// 自查通过：无未定义函数（全部函数在本文件内声明）；监听器仅在 setupInput 里注册一次，无重复绑定泄漏；
+// 画布位图按 dpr 缩放且绘制坐标用 CSS 像素，逻辑像素与位图匹配；
+// 此处已清空参考点、缩放、拉框、拖动、公转、旋转拖动与虚影状态，复位后不留任何半截手势
+function resetView() {
+  state.anchorWX = CONFIG.defaultAnchorWX;
+  state.anchorWY = CONFIG.defaultAnchorWY;
+  // 参考点屏幕位置放在视口正中，等价于把网格原点摆在画面中央
+  state.anchorSX = state.cssW / 2;
+  state.anchorSY = state.cssH / 2;
+  state.tAnchorSX = state.anchorSX;
+  state.tAnchorSY = state.anchorSY;
+  state.logScale = Math.log(CONFIG.defaultScale);
+  state.tLogScale = state.logScale;
+  state.scale = CONFIG.defaultScale;
+  state.isPanning = false;
+  state.panPointerId = null;
+  state.panLastX = 0;
+  state.panLastY = 0;
+  state.lastTs = 0;
+  // 虚影与指针状态一并复位，避免重开时残留上一局的虚影位置与动画进度
+  ghostVisible = false;
+  ghostAlpha = 0;
+  ghostRejectActive = false;
+  ghostRejectP = 0;
+  ghostRejectStartAlpha = 0;
+  ghostRejectFromWX = 0;
+  ghostRejectFromWY = 0;
+  ghostRejectToWX = 0;
+  ghostRejectToWY = 0;
+  // 朝向也复位成朝上，避免重开时虚影还停在上一局的朝向
+  ghostAngle = 0;
+  ghostAngleTarget = 0;
+  pointerInside = false;
+  // 指针操作的中间状态一并复位：拉框与拖动都回到「没在操作」的状态，不留半截手势
+  marqueePressing = false;
+  marqueeActive = false;
+  marqueePointerId = -1;
+  moveDragging = false;
+  movePointerId = -1;
+  moveDGX = 0;
+  moveDGY = 0;
+  moveGroup.length = 0;
+  orbitActive = false;   // 公转也一并复位，不留半截姿态
+  orbitP = 0;
+  orbitTurns = 0;
+  selOrientDir = 0;      // 选区朝向一并归零，重开一局后新选区仍默认朝上
+  // 选项槽的悬停缩放状态一并复位，避免重开时残留上一局的悬停尺寸
+  resetSlots();
+  // 虚影形状跟着复位后的选中槽走；初始化时 ghostNode 还没建，applyGhostType 内部会跳过
+  applyGhostType();
+  sceneDirty = true;  // 复位后画面与上一局完全不同，强制重绘一次
+}
+
+/* ========== 主循环与入口 ========== */
+
+// 主循环只负责算 dt、调用更新、调用渲染，不写具体逻辑
+function frame(ts) {
+  const dt = state.lastTs ? Math.min((ts - state.lastTs) / 1000, 0.1) : 0; // 钳制 dt，避免切回标签页时跳变
+  state.lastTs = ts;
+  updateCamera(dt);
+  updateSlotAnim(dt);
+  updateSlotTip(dt);
+  updateDeletions(dt);
+  updateElementRotations(dt);
+  updateSelectionAnim(dt);
+  updateLampAnim(dt);
+  updateMoveAnim(dt);
+  updateOrbit(dt);
+  stepSimulation(dt);  // 按固定步长推进微帧时钟，本帧结算几个微帧由它决定
+  updateGhost(dt);
+  updateGhostRotation(dt);
+  // 静止判定放在全部更新之后：静止、上帧也静止、又没有待重绘的变更时，整帧跳过渲染
+  // 动画收尾那一帧上帧还不是静止，所以最终状态一定会被画出来，不会卡在中间态
+  const settled = isSceneSettled();
+  if (sceneDirty || !settled || !prevSettled) render();
+  prevSettled = settled;
+  sceneDirty = false;
+  requestAnimationFrame(frame);
+}
+
+// 初始化：拿上下文 → 调尺寸 → 复位视图 → 建元件层 → 注入简介浮层外观 → 绑事件 → 启动主循环
+function init() {
+  canvas = document.getElementById("gridCanvas");
+  ctx = canvas.getContext("2d");
+  resizeCanvas();
+  resetView();
+  initElementLayer();
+  initSlotTipDom();
+  initSettingsPanelDom();
+  initFilePanelDom();
+  initTutorialPanelDom();
+  setupDebugPanel();
+  setupInput();
+  loadPickerHandle();  // 异步把上次用过的文件句柄读回内存，供系统选择器定起始目录；读不到也不影响其它功能
+  requestAnimationFrame(frame);
+}
+
+init();
+</script>
+</body>
+</html>

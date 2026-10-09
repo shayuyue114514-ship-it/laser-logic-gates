@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 标题显示在浏览器标签和搜索结果的大字上；简介显示在搜索结果标题下方那两行 -->
+<title>激光门 - 用光路搭出逻辑门</title>
+<meta name="description" content="使用激光逻辑门造就奇迹。用不同的元件做出电路，让激光沿网格逐格传播，把与门、或门、非门亲手搭出来，看光是怎么把它们算出来的。">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- 工作区竖栏：贴在窗口最左侧的一条，左、上、下都内缩一个间隙，与上方面板、底栏同处一个框内
+     宽度与配色由脚本从 CONFIG / COLOR 注入；栏里是存档列表，点最上面的文件夹名可以换一个文件夹
+     它的出现让上方那条面板与网格视口都不再横跨整行 -->
+<div id="sidebar">
+  <!-- 存档列表容器：行由脚本按所选文件夹里的真实条目生成，见 js/sidebar.js -->
+  <div id="sidebarTree"></div>
+</div>
+
+<canvas id="gridCanvas" tabindex="0"></canvas>
+<svg id="elemLayer"></svg>
+
+<!-- 简介浮层：排在元件层之后，配合 z-index 保证它永远画在元件之上 -->
+<div id="slotTip">
+  <div id="slotTipName"></div>
+  <div id="slotTipDesc"></div>
+</div>
+
+<!-- 列表里悬停时的小窗：写那一条的全名，位置跟着指针走
+     它必须放在竖栏外面：竖栏里的列表是可滚动的，挂在里面会被滚动容器裁掉 -->
+<div id="sidebarTip"></div>
+
+<!-- 设置弹窗：排在简介浮层之后，齿轮点亮时显示在齿轮正下方；开关初始带 on 类，与默认开启的状态一致 -->
+<div id="settingsPanel" class="popup">
+  <div class="row">
+    <span class="lbl">渲染网格</span>
+    <span class="sw on" id="gridSwitch"><span class="knob"></span></span>
+  </div>
+  <div class="row">
+    <span class="lbl">高级渲染</span>
+    <span class="sw on" id="advSwitch"><span class="knob"></span></span>
+  </div>
+  <div class="row">
+    <span class="lbl">运行速度</span>
+    <input type="range" id="speedSlider">
+    <span class="val" id="speedValue"></span>
+  </div>
+</div>
+
+<!-- 文件弹窗：文件按钮点亮时显示在该按钮正下方，与设置弹窗同款底板 -->
+<!-- 文件名一行，三个动作各占一行；动作本步只打印，确认接上之后下一步再换成真实读写 -->
+<div id="filePanel" class="popup">
+  <div class="row">
+    <span class="lbl">当前文件</span>
+    <span class="fname" id="fileName"></span>
+  </div>
+  <button class="btn" id="btnOpen">打开</button>
+  <button class="btn" id="btnSave">保存</button>
+  <button class="btn" id="btnSaveAs">另存为</button>
+  <button class="btn" id="btnImportSel">以选区导入</button>
+  <button class="btn" id="btnExportSel">以选区导出</button>
+</div>
+
+<!-- 教程弹窗：点教程按钮后从屏幕正中弹出，底板与设置、文件两个弹窗同一套配色 -->
+<!-- 左上角是一个叉形的关闭按钮，点了就把窗口关掉；下面的内容区先留空，等教程文字写好之后再填进去 -->
+<div id="tutorialPanel" class="popup modal">
+  <button class="btn icon" id="btnTutorialCancel" aria-label="取消">
+    <!-- 叉用两笔圆头描边画成，收笔是圆的，与画布上齿轮、文件、教程三个图标的收笔同一套 -->
+    <!-- 描边取 currentColor：颜色跟着按钮文字色走，以后改按钮色不必再改这里 -->
+    <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" focusable="false">
+      <path d="M5.5 5.5 L12.5 12.5 M12.5 5.5 L5.5 12.5"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+    </svg>
+  </button>
+  <div class="doc" id="tutorialDoc"></div>
+</div>
+
+<!-- 确认弹窗：只有一句问话和两个按钮，用在「丢掉手上的改动」这类要点头才继续的地方 -->
+<!-- 底板与教程弹窗是同一套（都走 .popup.modal），只是窄得多；问话文字由脚本按场合写进去，这里不写死 -->
+<div id="confirmPanel" class="popup modal confirm">
+  <div class="msg" id="confirmText"></div>
+  <div class="acts">
+    <!-- 左边是退路，右边是那件会丢东西的事：默认视线落在右边，与系统弹窗的习惯一致 -->
+    <button class="btn" id="btnConfirmCancel" type="button">取消</button>
+    <button class="btn primary" id="btnConfirmOk" type="button">丢弃</button>
+  </div>
+</div>
+
+<div id="debugPanel">
+  <!-- 性能读数：只读，不参与画面。按 P 开关这个面板，F2 同样可用（Mac 上功能键默认要按住 Fn），或在控制台执行 debugPanel.show() -->
+  <!-- 分两行排：第一行的三个都是时间（帧率 帧/秒，帧间隔与脚本耗时都是毫秒），第二行的四个都是规模，混排会读不清 -->
+  <!-- 脚本指每帧 JS 占用的时间，帧间隔指浏览器实际给到的间隔，两者一起看才知道帧率是被脚本拖住还是本来就到顶 -->
+  <div class="grp perfRow">
+    <label>帧率<span class="val" id="perfFps">--</span></label>
+    <label>帧间隔<span class="val" id="perfFrame">--</span></label>
+    <label>脚本<span class="val" id="perfScript">--</span></label>
+  </div>
+  <div class="grp perfRow">
+    <label>元件<span class="val" id="perfTotal">--</span></label>
+    <label>在屏<span class="val" id="perfDrawn">--</span></label>
+    <label>剔除<span class="val" id="perfCulled">--</span></label>
+    <label>缩放<span class="val" id="perfScale">--</span></label>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swFill"></span>
+    <label>填充</label>
+    <label>H<input type="range" id="fillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="fillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="fillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swStroke"></span>
+    <label>描边</label>
+    <label>H<input type="range" id="strokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="strokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="strokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeStroke"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swPanel"></span>
+    <label>底板</label>
+    <label>H<input type="range" id="panelH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="panelS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="panelL" min="0" max="100" step="1"></label>
+    <span class="code" id="codePanel"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSlot"></span>
+    <label>槽填充</label>
+    <label>H<input type="range" id="slotH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="slotS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="slotL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSlot"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swGearFill"></span>
+    <label>齿轮填充</label>
+    <label>H<input type="range" id="gearFillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="gearFillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="gearFillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeGearFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swGearStroke"></span>
+    <label>齿轮描边</label>
+    <label>H<input type="range" id="gearStrokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="gearStrokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="gearStrokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeGearStroke"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSetFill"></span>
+    <label>设置槽填充</label>
+    <label>H<input type="range" id="setFillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="setFillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="setFillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSetFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSetStroke"></span>
+    <label>设置槽描边</label>
+    <label>H<input type="range" id="setStrokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="setStrokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="setStrokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSetStroke"></span>
+  </div>
+</div>
+<!-- 加载顺序不可随意调整：util.js 必须排在最前面，因为 config.js 在文件顶层就要用 hslToRgb 算配色端点，
+       state.js 在文件顶层要调用缓动函数，两者都要用到工具函数；把工具函数提到最前，这两处才都不会落空 -->
+<script src="js/util.js"></script>
+<script src="js/config.js"></script>
+<script src="js/element-types.js"></script>
+<script src="js/state.js"></script>
+<script src="js/render-scene.js"></script>
+<script src="js/render-panel.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/files.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/slots.js"></script>
+<script src="js/elements.js"></script>
+<script src="js/history.js"></script>
+<script src="js/circuit.js"></script>
+<script src="js/selection.js"></script>
+<script src="js/ghost.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/input.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

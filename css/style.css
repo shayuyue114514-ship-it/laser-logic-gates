@@ -1,0 +1,446 @@
+/* 页面白底、无滚动条：网格只出现在视口矩形内，视口外保持白底 */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+/* 工作区竖栏：贴在窗口最左侧的一条，左、上、下都内缩一个间隙，与上方面板、底栏同处一个框内
+   宽度、三边位置与配色都由脚本从 CONFIG / COLOR 注入，这里只管定位与层级
+   四条边都描边：只有右边一条时，竖栏的顶与底看不出到哪里为止
+   层级压在画布与元件层之上，但低于所有弹窗（弹窗从 4 起），弹窗打开时竖栏让在下面 */
+#sidebar {
+  position: fixed;
+  box-sizing: border-box;
+  z-index: 2;
+  border: 2px solid;
+}
+/* 竖栏里的存档列表：整栏只放这一棵树，行高、缩进、图标一律定死，条目多了由它自己滚动 */
+#sidebarTree {
+  box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto;
+  padding: 6px 0 8px;
+  font-size: 13px;
+  user-select: none;      /* 列表是拿来点开合的，顺手选中一行文字反而碍事 */
+}
+/* 空状态：还没有工作区时，照资源管理器那种排法自上而下摆一列内容，左右留出与列表同宽的边距 */
+#sidebarTree.is-empty {
+  padding: 10px 12px;
+}
+/* 空状态里的标题行：与有工作区时的根目录名同一档字重，但它不可点，所以不给手型光标与悬停底色 */
+.sb-empty-title {
+  display: flex;
+  align-items: center;
+  color: #0D47A1;
+  font-weight: 700;
+}
+/* 空状态里的说明：比标题轻一档，行高放开一点，读起来是一句话而不是又一个标题 */
+.sb-empty-hint {
+  margin: 6px 0 10px;
+  color: #2C4A63;
+  line-height: 1.5;
+}
+/* 「选择文件夹」按钮：整条铺满竖栏，浅底深字，不描边 */
+/* 底色取 tipFill 那一档的浅蓝，与上方面板、弹窗是同一种浅底；字用深蓝，
+   白字压在浅蓝上读不清，实心深色底又和这一栏的调子不搭 */
+.sb-pick {
+  display: block;
+  width: 100%;
+  padding: 7px 0;
+  border: none;
+  border-radius: 6px;
+  background: #C4EBFF;
+  color: #0D47A1;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 0.16s ease-out;
+}
+.sb-pick:hover { background: #D8F3FF; }   /* 悬停略亮一档：与列表里那种淡白高亮区分开，它是按钮不是行 */
+.sb-pick:active { background: #ADDCF5; }  /* 按下压深一档，手感像真的按进去 */
+
+/* 列表里悬停时的小窗：写这一条的全名 */
+/* 用 fixed 定位在窗口坐标上：位置只跟指针走，不随列表滚动，也不会被列表那个滚动容器裁掉 */
+/* 配色取简介浮层那一套的浅蓝底与深蓝字，一眼看得出是同一族浮层；不描边，靠底色自己立住 */
+#sidebarTip {
+  display: none;
+  position: fixed;
+  z-index: 5;               /* 与简介浮层同一档：压在竖栏与各面板之上，仍在弹窗之下 */
+  max-width: 260px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #C4EBFF;
+  color: #0D47A1;
+  font-size: 12px;
+  line-height: 17px;
+  word-break: break-all;    /* 名字很长时按字符折行，不会拉出一条极宽的小窗 */
+  pointer-events: none;     /* 指针从小窗上穿过去：它不会变成悬停目标，也就不会把自己关掉 */
+  user-select: none;
+}
+/* 根目录名：独占一行，比下面的条目重一档，底下一条淡淡的线把名字和列表分开 */
+/* 左内边距取 10：加上文件夹图标正好比下面第一级条目的图标左移一个缩进格，读起来它就是这些条目的上级 */
+/* 整行可点：点它是换一个文件夹，所以给出手型光标和一层悬停底色，让人知道这里能点 */
+.sb-header {
+  display: flex;
+  align-items: center;
+  padding: 2px 10px 8px;
+  margin-bottom: 6px;
+  font-weight: 700;
+  color: #0D47A1;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(13, 71, 161, 0.16);
+}
+.sb-header:hover { background: rgba(255, 255, 255, 0.35); }
+/* 一条条目：图标与文字横向排开，行高定死，整行都是可点区域 */
+.sb-row {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  white-space: nowrap;
+  color: #123B54;
+}
+.sb-row:hover { background: rgba(255, 255, 255, 0.45); }
+.sb-row.is-folder { cursor: pointer; }
+/* 当前打开的那一条：本项目里白色代表选中，所以仍是一层白底，只是浓度压下来，比悬停明显一档又不过分扎眼 */
+.sb-row.is-selected { background: rgba(255, 255, 255, 0.62); color: #0D47A1; }
+/* 缩进导引条：一级一根，竖线拉满整行高，位置正对上一级箭头的中线 */
+.sb-guide {
+  position: relative;
+  flex: none;
+  width: 14px;
+  align-self: stretch;
+}
+.sb-guide::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(13, 71, 161, 0.18);
+}
+/* 行首的箭头位：文件夹放箭头，文件放一个等宽的空位，两种行的图标因此纵向对齐 */
+.sb-chev {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: #2F7CA8;
+}
+.sb-chev svg { transition: transform 0.12s ease-out; }
+.sb-chev.is-closed svg { transform: rotate(-90deg); }   /* 收起：朝下的箭头转成朝右 */
+/* 图标：文件夹实心、文件只描边，颜色一律走 currentColor，改配色只在这里改 */
+.sb-icon {
+  flex: none;
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 0 6px 0 2px;
+}
+.sb-icon.folder { color: #1B6C8F; }
+.sb-icon.file { color: #4E86A8; }
+/* 名称：占满剩余宽度，太长的名字从右边省略，绝不把整行撑破 */
+.sb-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 未保存的圆点：夹在图标与名字之间，出现与消失都走一下宽度与浓淡的缓动 */
+/* 常态宽度收成 0、全透明：它一直占着位置，只是把宽度收到没有，名字才会随着它展开而平滑右移 */
+.sb-dot {
+  flex: none;
+  width: 0;
+  height: 6px;
+  margin-right: 0;
+  border-radius: 50%;
+  background: #1A1A1A;
+  opacity: 0;
+  transition: width 0.18s ease-out, margin-right 0.18s ease-out, opacity 0.18s ease-out;
+}
+.sb-dot.is-on {
+  width: 6px;
+  margin-right: 6px;   /* 亮起来时连这一道间距一起长出来，名字不会被圆点顶得忽近忽远 */
+  opacity: 1;
+}
+/* 正在写盘：圆点原地呼吸。写盘那一下可能要好几秒，光「亮着」看不出是在等，得会动才行
+   呼吸只改 transform 与 opacity，不占布局，名字不会被它推得忽左忽右 */
+.sb-dot.is-saving {
+  animation: sbDotBreathe 1.4s ease-in-out infinite;
+}
+@keyframes sbDotBreathe {
+  0%, 100% { transform: scale(0.72); opacity: 0.45; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+/* touch-action 关掉浏览器自带手势，避免与滚轮缩放、中键拖拽冲突 */
+#gridCanvas {
+  display: block;
+  touch-action: none;
+  user-select: none;
+  /* 画布本身不可聚焦，加 tabindex 后可以主动抢键盘焦点；全屏画布不需要焦点框 */
+  outline: none;
+}
+/* 元件层：盖在画布上方的 SVG，本步不做交互，指针事件全部透传给画布 */
+#elemLayer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+/* 简介浮层：独立于 Canvas 的 DOM 层，靠 z-index 压在元件层之上，不会被网格上的元件盖住
+   这里只管定位与层级，字号、内边距、圆角、颜色都由 JS 从 CONFIG / COLOR 一次性注入 */
+#slotTip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  border: 2px solid;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+#slotTipName {
+  font-weight: 600;
+}
+/* 弹出面板的通用外观：设置弹窗与文件弹窗共用这一类，两者的底板、行布局、控件样式完全一致
+   这里只管定位与层级，字号、内边距、圆角、颜色由 JS 从 CONFIG / COLOR 一次性注入
+   显示时要接住鼠标，所以指针事件是开的；隐藏时 display 为 none，自然收不到任何事件 */
+.popup {
+  position: fixed;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  display: none;
+  border: 2px solid;
+  opacity: 0;
+  pointer-events: auto;
+  z-index: 4;
+}
+/* 弹窗里的每一行：文字靠左、控件靠右，行高由 JS 从配置注入，以后放滑块也按同一行高对齐 */
+.popup .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+/* 开关：圆角滑轨加圆形滑块，开与关只差一个类，滑块位移和滑轨变色都交给 CSS 过渡 */
+/* 尺寸写死在这里而不是走配置：它只有这一处用，且必须和行高对得上，放配置区反而多一层跳转 */
+.popup .sw {
+  position: relative;
+  flex: none;                 /* 不被左边的文字挤扁 */
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: #B9CBD8;        /* 关闭态滑轨：灰蓝，明确区别于开启态 */
+  transition: background-color 0.16s ease-out;  /* 与槽反馈同为 0.16 秒的缓出，手感统一 */
+}
+.popup .sw .knob {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 0.16s ease-out;
+}
+.popup .sw.on {
+  background: #29B6F6;        /* 开启态滑轨：与视口边框同色，整页仍是同一色系 */
+}
+.popup .sw.on .knob {
+  transform: translateX(16px);  /* 滑轨宽 34 减滑块 14 再减左右各 2 的留边 */
+}
+/* 行首文字：禁止换行并禁止收缩，否则一行挤不下时会被压成一字一行 */
+.popup .lbl {
+  flex: none;
+  white-space: nowrap;
+}
+/* 速度滑块：轨道与滑块交给浏览器原生渲染，只用 accent-color 把它染成同一个蓝 */
+/* 宽度写死并禁止收缩，否则会被左边的文字挤变形，与开关同样对待 */
+.popup input[type="range"] {
+  flex: none;
+  width: 110px;
+  accent-color: #29B6F6;
+}
+/* 速度数值：做成小徽章，白底圆角、数字等宽居中，读数清楚又不像裸露的文本 */
+.popup .val {
+  flex: none;
+  box-sizing: border-box;
+  width: 58px;
+  margin-left: 8px;
+  padding: 3px 0;
+  text-align: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1B6C8F;                /* 深一档的蓝：白底上比正文灰更清楚 */
+  font-variant-numeric: tabular-nums;  /* 等宽数字：拖动时数字跳动不会左右晃 */
+}
+/* 文件名：占满行内剩余宽度，超长时从左侧省略，绝不把整行撑破 */
+.popup .fname {
+  flex: 1;
+  min-width: 0;               /* 缺了它，弹性子项不会收缩，省略号永远不会出现 */
+  margin-left: 8px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #1B6C8F;
+}
+/* 文件弹窗里的动作项：一行一个，整行都是可点区域 */
+/* 平时不着色也不描边，只在悬停时浮出一层淡蓝——弹窗本身很窄，再并排放三块白底会显得很吵 */
+.popup .btn {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #1B6C8F;             /* 深一档的蓝：与文件名同色，读起来是「可以点的」，又不必加底板 */
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.16s ease-out;
+}
+.popup .btn:hover { background: rgba(255, 255, 255, 0.66); }
+.popup .btn:active { background: rgba(255, 255, 255, 0.92); }
+/* 教程弹窗：点教程按钮后从屏幕正中弹出，比设置、文件两个弹窗大得多 */
+/* 居中用左右各 50% 再位移自身一半来实现，与窗口实际尺寸无关，所以尺寸改大改小都不用动这里 */
+.popup.modal {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  flex-direction: column;   /* 取消按钮在上、内容区在下，纵向排 */
+  z-index: 6;               /* 压在所有浮层之上：它是模态窗口，弹出来就在最前面 */
+}
+/* 关闭按钮：一个正方形的图标按钮，叉是 SVG 里两笔圆头描边，收笔的圆与画布上那几个图标一致 */
+/* 这里特意不给常态底色：本项目里白色是「选中」的信号，一个常驻白底的按钮会被读成当前选中项 */
+/* 只靠深一档的蓝表示「可点」，与文件弹窗里那几个动作项同一套读法 */
+.popup.modal .btn.icon {
+  align-self: flex-start;   /* 靠左上收住：不写这句会被横向拉伸，按钮就占满一整行 */
+  flex: none;
+  justify-content: center;  /* .popup .btn 默认把内容靠左排，图标要居中才不偏在左边 */
+  width: 26px;              /* 与设置弹窗的行高同档，刚好放得下 18 的图标再留一圈空白 */
+  height: 26px;
+  padding: 0;               /* 尺寸已经定死，内边距再撑就会把图标挤歪 */
+}
+.popup.modal .btn.icon svg {
+  pointer-events: none;     /* 让指针事件一律落在按钮本身上：按下时判定的是按钮，不是里面的路径 */
+}
+/* 内容区：占满取消按钮之外的全部高度；文字多了自己滚动，绝不把窗口撑高 */
+/* 底色与文字色由 JS 从 COLOR 注入，取的是「未选中」那一档的蓝，压暗窗口底板一级，读起来是凹进去的一块 */
+.popup.modal .doc {
+  box-sizing: border-box;
+  flex: 1;                  /* 吃掉剩余高度，窗口加高时它跟着长 */
+  min-height: 0;            /* 缺了它，弹性子项不会低于内容自身高度，滚动条就永远不出现 */
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  line-height: 1.6;
+  user-select: text;        /* 教程是给人读的，允许选中复制 */
+  white-space: normal;      /* 正文改用块级元素分层排布，版面由结构决定，不再取决于源码里的换行与缩进 */
+}
+/* 确认弹窗：只有一句问话和两个按钮，比教程窗口矮得多，也不该有内容区那种凹下去的一块 */
+/* 层级排在教程窗口之上：它是「先回答才能继续」的窗口，弹出来就必须在最前面 */
+.popup.modal.confirm {
+  z-index: 7;
+}
+/* 问话：居中一行，下面留出与按钮行的间距；字号比弹窗正文略大，句子本身就是重点 */
+/* 它不像内容区那样自己滚动：问话固定一句，短到不会撑高窗口 */
+.popup.modal.confirm .msg {
+  flex: none;
+  margin: 2px 0 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+/* 按钮行：靠右排，与系统弹窗的习惯一致（右边是那件会丢东西的事，左边是退路） */
+.popup.modal.confirm .acts {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 8px;
+  /* 让按钮行自己定高，不继承弹窗行高；否则两个按钮会被拉成整行高 */
+  height: auto;
+}
+/* 确认窗口里的按钮：不再整行铺开，而是各按自己文字的宽窄收住 */
+.popup.modal.confirm .acts .btn {
+  justify-content: center;   /* .popup .btn 默认把内容靠左排，按钮里只有两个字，要居中才不偏 */
+  width: auto;
+  flex: none;
+  height: 28px;
+  padding: 0 16px;
+}
+/* 右边那个确认键：浅蓝底配深蓝字，与侧栏里的「选择文件夹」同一个读法，一眼能认出是主行动 */
+/* 本项目里白色代表选中，所以这里用蓝底而不是白底，免得被读成「当前选中的一项」 */
+.popup .btn.primary {
+  background: #C4EBFF;
+  color: #0D47A1;
+  font-weight: 600;
+}
+.popup .btn.primary:hover { background: #D8F3FF; }
+.popup .btn.primary:active { background: #ADDCF5; }
+/* 调试面板：默认隐藏，用 debugPanel.show() 唤出；浮在网格之上，方便随时调参 */
+/* 钉在左下角而不是左上角：左上角是元件选择面板的位置，钉在那里会把选项槽全挡住 */
+#debugPanel {
+  display: none;
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #90CAF9;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #111111;
+  z-index: 10;
+  user-select: none;
+}
+#debugPanel .grp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#debugPanel .grp + .grp {
+  margin-top: 6px;
+}
+#debugPanel .sw {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #1565C0;
+  border-radius: 3px;
+}
+#debugPanel label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #444444;
+}
+#debugPanel input[type="range"] {
+  width: 84px;
+}
+#debugPanel .code {
+  font-family: Menlo, Consolas, monospace;
+  color: #444444;
+}
+/* 性能读数：数值用等宽字体并定一个最小宽度，位数变化时它右边的标签不会跟着左右晃 */
+#debugPanel .perfRow .val {
+  min-width: 44px;
+  font-family: Menlo, Consolas, monospace;
+  color: #0D47A1;
+}
+/* 读数区与下面的取色滑块之间画一条分隔线，一眼能看出上面那块是只读的监测区 */
+#debugPanel .perfRow {
+  padding-bottom: 6px;
+  border-bottom: 1px solid #CFE3F2;
+}
