@@ -9,7 +9,7 @@
 // mCache 是排版结果的缓存，null 表示还没算过；它只跟着缩放与文字变，所以键就用这两样
 function placeText(wx, wy, text) {
   const tx = {
-    id: nextTextId++, wx: wx, wy: wy, text: text, mCache: null,
+    id: S.nextTextId++, wx: wx, wy: wy, text: text, mCache: null,
     // 下面这几项是选中用的：浮动文本也进选区，跟着元件一起被拖动、删除
     // 它不占格子，所以没有「离地 / 落位」这回事：选中对它只意味着「接下来这一批操作要带上它」
     selected: false,   // boolean：是否在选区里
@@ -19,8 +19,8 @@ function placeText(wx, wy, text) {
     mvOffU: 0,         // number：跟着选区拖动时的视觉偏移 u（世界单位），与元件的拖动缓动同一套
     mvOffV: 0          // number：同上，v
   };
-  texts.push(tx);
-  sceneDirty = true;
+  S.texts.push(tx);
+  S.sceneDirty = true;
   return tx;
 }
 
@@ -45,13 +45,13 @@ function writeTextRecord(tx, rec) {
 // 把文本挂回画面：已经在列表里的只补状态，不重复插入
 // 文本直接画在画布上，没有节点要挂
 function attachText(tx) {
-  if (texts.indexOf(tx) < 0) texts.push(tx);
+  if (S.texts.indexOf(tx) < 0) S.texts.push(tx);
 }
 
 // 把文本从画面摘掉：对象还被历史里的差分引用着，撤销时原样挂回去
 function detachText(tx) {
-  const i = texts.indexOf(tx);
-  if (i >= 0) texts.splice(i, 1);
+  const i = S.texts.indexOf(tx);
+  if (i >= 0) S.texts.splice(i, 1);
 }
 
 // 删除屏幕位置所在的那块浮动文本：视口外、或这里没有文本，都直接忽略
@@ -62,7 +62,7 @@ function deleteTextAtScreen(screenX, screenY) {
   const tx = textAtPointer(screenX, screenY);
   if (tx === null) return false;
   detachText(tx);
-  sceneDirty = true;
+  S.sceneDirty = true;
   commitHistory();  // 摘掉这一刻它就已经不在画面上了，所以在这里记步
   return true;
 }
@@ -72,12 +72,12 @@ function deleteTextAtScreen(screenX, screenY) {
 // 返回是否真的删掉了东西，供 deleteSelection 汇总「这次按键有没有被选区接手」
 function deleteSelectedTexts() {
   let any = false;
-  for (let i = texts.length - 1; i >= 0; i--) {
-    if (!texts[i].selected) continue;
-    detachText(texts[i]);
+  for (let i = S.texts.length - 1; i >= 0; i--) {
+    if (!S.texts[i].selected) continue;
+    detachText(S.texts[i]);
     any = true;
   }
-  if (any) sceneDirty = true;
+  if (any) S.sceneDirty = true;
   return any;
 }
 
@@ -159,11 +159,11 @@ function textBlockMetrics(tx) {
     let x = 0;
     for (let k = 0; k < raw.length; k++) {
       const s = raw[k];
-      ctx.save();
+      S.ctx.save();
       // 量宽度前必须先设字体，否则量到的是上一次留在上下文里的那一档
-      ctx.font = mdFontCss({ italic: s.italic, bold: s.bold, fontPx: fontPx });
-      const sw = ctx.measureText(s.text).width;
-      ctx.restore();
+      S.ctx.font = mdFontCss({ italic: s.italic, bold: s.bold, fontPx: fontPx });
+      const sw = S.ctx.measureText(s.text).width;
+      S.ctx.restore();
       spans.push({
         text: s.text, x: x, w: sw, fontPx: fontPx, color: mdSpanColor(s, st), bold: s.bold, italic: s.italic
       });
@@ -199,16 +199,16 @@ function textBlockLayout(tx) {
 // 不做任何基于缩放的隐藏：缩多小就画多小，唯一的跳过是视口剔除与空内容
 // 也不做「字太小就改画一块灰」：字号连续变小时，字形本来就按覆盖面积算像素亮度，那份亮度差别就是「这里有字」的信息
 function drawFloatingTexts(vp) {
-  if (texts.length === 0) return;  // 一块都没有就整段跳过，连保存与裁剪都不做
+  if (S.texts.length === 0) return;  // 一块都没有就整段跳过，连保存与裁剪都不做
   const pad = CONFIG.textHitPad;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(vp.x, vp.y, vp.w, vp.h);  // 裁剪到视口：文字不会画到上方面板与底栏上
-  ctx.clip();
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";          // 按行顶对齐：多行排版只需逐行累加行高，不必去算基线
-  for (let i = 0; i < texts.length; i++) {
-    const tx = texts[i];
+  S.ctx.save();
+  S.ctx.beginPath();
+  S.ctx.rect(vp.x, vp.y, vp.w, vp.h);  // 裁剪到视口：文字不会画到上方面板与底栏上
+  S.ctx.clip();
+  S.ctx.textAlign = "left";
+  S.ctx.textBaseline = "top";          // 按行顶对齐：多行排版只需逐行累加行高，不必去算基线
+  for (let i = 0; i < S.texts.length; i++) {
+    const tx = S.texts[i];
     const lay = textBlockLayout(tx);
     // 视口剔除：整块文字都在视口外就跳过，连绘制都不提交
     if (lay.x + lay.w + pad < vp.x || lay.x - pad > vp.x + vp.w ||
@@ -218,14 +218,14 @@ function drawFloatingTexts(vp) {
     // 底色与外框都画在字形之前，所以任何一个字都不会被它盖住
     const selOn = tx.selPreview !== null ? tx.selPreview : tx.selected;
     if (selOn && tx.selP.cur > 0.001) {
-      ctx.save();
-      ctx.globalAlpha = tx.selP.cur;
-      ctx.fillStyle = COLOR.selectFill;
-      ctx.fillRect(lay.x - pad, lay.y - pad, lay.w + pad * 2, lay.h + pad * 2);
-      ctx.lineWidth = CONFIG.marqueeWidth;
-      ctx.strokeStyle = COLOR.selectBorder;
-      ctx.strokeRect(lay.x - pad, lay.y - pad, lay.w + pad * 2, lay.h + pad * 2);
-      ctx.restore();
+      S.ctx.save();
+      S.ctx.globalAlpha = tx.selP.cur;
+      S.ctx.fillStyle = COLOR.selectFill;
+      S.ctx.fillRect(lay.x - pad, lay.y - pad, lay.w + pad * 2, lay.h + pad * 2);
+      S.ctx.lineWidth = CONFIG.marqueeWidth;
+      S.ctx.strokeStyle = COLOR.selectBorder;
+      S.ctx.strokeRect(lay.x - pad, lay.y - pad, lay.w + pad * 2, lay.h + pad * 2);
+      S.ctx.restore();
     }
     let y = lay.y;
     for (let k = 0; k < lay.lines.length; k++) {
@@ -233,14 +233,14 @@ function drawFloatingTexts(vp) {
       for (let j = 0; j < line.spans.length; j++) {
         const s = line.spans[j];
         if (s.text === "") continue;
-        ctx.font = mdFontCss(s);
-        ctx.fillStyle = s.color;
-        ctx.fillText(s.text, lay.x + s.x, y);
+        S.ctx.font = mdFontCss(s);
+        S.ctx.fillStyle = s.color;
+        S.ctx.fillText(s.text, lay.x + s.x, y);
       }
       y += line.h;
     }
   }
-  ctx.restore();
+  S.ctx.restore();
 }
 
 /* ========== 命中 ========== */
@@ -250,10 +250,10 @@ function drawFloatingTexts(vp) {
 function textAtPointer(sx, sy) {
   const pad = CONFIG.textHitPad;
   let hit = null;
-  for (let i = 0; i < texts.length; i++) {
-    const lay = textBlockLayout(texts[i]);
+  for (let i = 0; i < S.texts.length; i++) {
+    const lay = textBlockLayout(S.texts[i]);
     if (sx >= lay.x - pad && sx <= lay.x + lay.w + pad &&
-        sy >= lay.y - pad && sy <= lay.y + lay.h + pad) hit = texts[i];
+        sy >= lay.y - pad && sy <= lay.y + lay.h + pad) hit = S.texts[i];
   }
   return hit;
 }
@@ -274,12 +274,12 @@ function textHitsMarquee(tx, box) {
 // 这里刻意不记历史：调用方紧接着都会走一次 applySelection，那一次提交会把两半改动一起记成一步
 // 若这里也记一次，一次单击就会占掉两步撤销
 function applyTextSelection(isHit, toggle) {
-  for (let i = 0; i < texts.length; i++) {
-    const tx = texts[i];
+  for (let i = 0; i < S.texts.length; i++) {
+    const tx = S.texts[i];
     const hit = isHit(tx);
     tx.selected = toggle ? (hit ? !tx.selBase : tx.selBase) : hit;
   }
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 
 /* ========== 拖动 ========== */
@@ -287,60 +287,60 @@ function applyTextSelection(isHit, toggle) {
 // 按下浮动文本：进入「按住了」状态，记下起点，并记下它原来在哪，供拖动被打断时摆回原处
 // 此刻先不挪：双击这块文字是要改内容，若按下就跟着指针跑，双击的第一下会把它抖歪
 function beginTextDrag(e, tx) {
-  textDragging = true;
-  textDragActive = false;
-  textPointerId = e.pointerId;
-  textDragEl = tx;
-  textDragStartSX = e.clientX;
-  textDragStartSY = e.clientY;
-  textDragStartWX = screenToWorldX(e.clientX);
-  textDragStartWY = screenToWorldY(e.clientY);
-  textDragFromWX = tx.wx;
-  textDragFromWY = tx.wy;
-  canvas.setPointerCapture(e.pointerId);
+  S.textDragging = true;
+  S.textDragActive = false;
+  S.textPointerId = e.pointerId;
+  S.textDragEl = tx;
+  S.textDragStartSX = e.clientX;
+  S.textDragStartSY = e.clientY;
+  S.textDragStartWX = screenToWorldX(e.clientX);
+  S.textDragStartWY = screenToWorldY(e.clientY);
+  S.textDragFromWX = tx.wx;
+  S.textDragFromWY = tx.wy;
+  S.canvas.setPointerCapture(e.pointerId);
 }
 
 // 拖动浮动文本：位移取「指针此刻的世界坐标减去按下那一刻的世界坐标」
 // 用世界坐标之差而不是屏幕像素之差：拖动期间若用中键平移了视野，画面位移会多算一份，这里从根上避开
 // 指针要移过与拉框同一个阈值才真的开始挪：不设这一关，手一抖就会把文字挪偏一两个像素
 function moveTextDrag(e) {
-  if (!textDragging || e.pointerId !== textPointerId || textDragEl === null) return;
-  if (!textDragActive) {
-    const mdx = e.clientX - textDragStartSX;
-    const mdy = e.clientY - textDragStartSY;
+  if (!S.textDragging || e.pointerId !== S.textPointerId || S.textDragEl === null) return;
+  if (!S.textDragActive) {
+    const mdx = e.clientX - S.textDragStartSX;
+    const mdy = e.clientY - S.textDragStartSY;
     if (mdx * mdx + mdy * mdy < CONFIG.marqueeThreshold * CONFIG.marqueeThreshold) return;
-    textDragActive = true;  // 移过阈值，从这一刻起才算真的在拖
+    S.textDragActive = true;  // 移过阈值，从这一刻起才算真的在拖
   }
-  textDragEl.wx = textDragFromWX + (screenToWorldX(e.clientX) - textDragStartWX);
-  textDragEl.wy = textDragFromWY + (screenToWorldY(e.clientY) - textDragStartWY);
-  sceneDirty = true;  // 位置变了，静止时也得重绘一帧才看得到
+  S.textDragEl.wx = S.textDragFromWX + (screenToWorldX(e.clientX) - S.textDragStartWX);
+  S.textDragEl.wy = S.textDragFromWY + (screenToWorldY(e.clientY) - S.textDragStartWY);
+  S.sceneDirty = true;  // 位置变了，静止时也得重绘一帧才看得到
 }
 
 // 松开浮动文本：收状态并记一步；位置变了，撤销要能把它摆回原处
 function endTextDrag(e) {
-  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
-  const moved = textDragEl;
-  textDragging = false;
-  textDragActive = false;
-  textPointerId = -1;
-  textDragEl = null;
-  sceneDirty = true;
+  if (S.canvas.hasPointerCapture(e.pointerId)) S.canvas.releasePointerCapture(e.pointerId);
+  const moved = S.textDragEl;
+  S.textDragging = false;
+  S.textDragActive = false;
+  S.textPointerId = -1;
+  S.textDragEl = null;
+  S.sceneDirty = true;
   // 记一步由 commitHistory 自己比对：按下没动就松开时它什么都不记，不会白占一步
   if (moved !== null) commitHistory();
 }
 
 // 拖动被系统打断（如触控中断）：把文本摆回原处再收状态，与拖动元件被打断时的处理一致
 function cancelTextDrag(e) {
-  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
-  if (textDragEl !== null) {
-    textDragEl.wx = textDragFromWX;
-    textDragEl.wy = textDragFromWY;
+  if (S.canvas.hasPointerCapture(e.pointerId)) S.canvas.releasePointerCapture(e.pointerId);
+  if (S.textDragEl !== null) {
+    S.textDragEl.wx = S.textDragFromWX;
+    S.textDragEl.wy = S.textDragFromWY;
   }
-  textDragging = false;
-  textDragActive = false;
-  textPointerId = -1;
-  textDragEl = null;
-  sceneDirty = true;
+  S.textDragging = false;
+  S.textDragActive = false;
+  S.textPointerId = -1;
+  S.textDragEl = null;
+  S.sceneDirty = true;
 }
 
 /* ========== 文本工具 ========== */
@@ -366,10 +366,10 @@ function measureLinePrefix(line, n) {
     const take = n - used;
     if (take <= 0) break;
     if (take >= s.text.length) { x += s.w; used += s.text.length; continue; }
-    ctx.save();
-    ctx.font = mdFontCss(s);
-    x += ctx.measureText(s.text.slice(0, take)).width;
-    ctx.restore();
+    S.ctx.save();
+    S.ctx.font = mdFontCss(s);
+    x += S.ctx.measureText(s.text.slice(0, take)).width;
+    S.ctx.restore();
     break;
   }
   return x;
@@ -400,75 +400,75 @@ function caretPointFromIndex(text, m, index) {
 // 新建一块时先真的把它放进 texts：画布就是从 texts 里取字形来画的，不放进去就没有实时染色可看
 // 代价只是「可能是空的」这一种中间状态，由 textEditIsNew 与收尾那一步负责收拾干净
 function beginTextEditing(tx, isNew) {
-  if (textEditing) endTextEditing(true);  // 上一块还没收尾（正常不会遇到）：先把它收干净，避免两块互相串状态
-  textEditEl = tx;
-  textEditIsNew = isNew;
-  textEditFromText = isNew ? "" : tx.text;
-  textEditImeLen = 0;
-  textEditing = true;
-  textFieldDom.value = isNew ? "" : tx.text;
-  textFieldDom.style.display = "block";
+  if (S.textEditing) endTextEditing(true);  // 上一块还没收尾（正常不会遇到）：先把它收干净，避免两块互相串状态
+  S.textEditEl = tx;
+  S.textEditIsNew = isNew;
+  S.textEditFromText = isNew ? "" : tx.text;
+  S.textEditImeLen = 0;
+  S.textEditing = true;
+  S.textFieldDom.value = isNew ? "" : tx.text;
+  S.textFieldDom.style.display = "block";
   syncTextEditField();
   // 光标放到末尾：改一块已有的文字时，多半是接着往下补，而不是从头重打
-  const n = textFieldDom.value.length;
-  textFieldDom.setSelectionRange(n, n);
+  const n = S.textFieldDom.value.length;
+  S.textFieldDom.setSelectionRange(n, n);
   // 焦点留到下一帧再抢，这里千万不能立刻就抢
   // 画布带 tabindex，这一下点击的默认行为还没走完，浏览器随后会把焦点给回画布；
   // 抢早了的焦点马上被它覆盖，输入框随即失焦，而失焦那一步会把这次输入当成「收下」——
   // 一块刚建、还空着的文字会被当场摘掉，画面上什么都不剩，看上去就是「点了没反应」
   // 放到下一帧，就在那次默认行为之后，焦点才真的落在输入框上
   requestAnimationFrame(function () {
-    if (!textEditing || textEditEl !== tx) return;  // 期间用户可能已经点到别处、把这次输入收掉了
-    textFieldDom.setSelectionRange(n, n);           // 再设一次：这一帧之间光标没动过，位置仍是末尾
-    textFieldDom.focus();
+    if (!S.textEditing || S.textEditEl !== tx) return;  // 期间用户可能已经点到别处、把这次输入收掉了
+    S.textFieldDom.setSelectionRange(n, n);           // 再设一次：这一帧之间光标没动过，位置仍是末尾
+    S.textFieldDom.focus();
   });
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 
 // 收尾：commit 为真表示把框里的内容写回去，为假表示放弃
 // 放弃时分两种：这一轮新建的直接摘掉，本来就在的把内容退回原样，两种都不记历史
 // 写回时内容为空也摘掉：与元件标签那条「清空即删除」一致，免得画布上留一块看不见却点得中的空盒子
 function endTextEditing(commit) {
-  if (!textEditing) return;  // 已经收过了（例如画布那一处与输入框失焦两处同时收）：直接走开，不要重复写一遍
-  const tx = textEditEl;
-  const isNew = textEditIsNew;
-  const from = textEditFromText;
-  const text = textFieldDom.value;
-  textEditing = false;
-  textEditEl = null;
-  textEditIsNew = false;
-  textEditFromText = "";
-  textEditImeLen = 0;
-  textFieldDom.style.display = "none";
+  if (!S.textEditing) return;  // 已经收过了（例如画布那一处与输入框失焦两处同时收）：直接走开，不要重复写一遍
+  const tx = S.textEditEl;
+  const isNew = S.textEditIsNew;
+  const from = S.textEditFromText;
+  const text = S.textFieldDom.value;
+  S.textEditing = false;
+  S.textEditEl = null;
+  S.textEditIsNew = false;
+  S.textEditFromText = "";
+  S.textEditImeLen = 0;
+  S.textFieldDom.style.display = "none";
   if (tx === null) return;
   if (!commit) {
     if (isNew) detachText(tx);
     else tx.text = from;
-    sceneDirty = true;
+    S.sceneDirty = true;
     return;
   }
   if (text.trim() === "") {
     detachText(tx);
     if (!isNew) commitHistory();  // 本来有内容、现在被清空，这是一次真实的删除，要能撤销
-    sceneDirty = true;
+    S.sceneDirty = true;
     return;
   }
   tx.text = text;
   tx.mCache = null;  // 内容变了，排版缓存作废；不靠键比对去发现，主动清掉更省一次字符串拼接
   commitHistory();   // commitHistory 自己比对：内容与原来一样时它什么都不记，不会白占一步
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 
 // 把输入框同步到那块文字的屏幕位置上：位置、尺寸、字号、行高全部按画布的排版结果给
 // 每帧都同步一次，所以编辑期间相机平移或缩放时，框与字形会一起走，不会各走各的
 // 框里的字是透明的、看不见，字号只用来决定输入法候选框停在哪，以及选中底色的行高
 function syncTextEditField() {
-  const tx = textEditEl;
-  if (!textEditing || tx === null) return;
+  const tx = S.textEditEl;
+  if (!S.textEditing || tx === null) return;
   const lay = textBlockLayout(tx);
   const fontPx = CONFIG.textFontSize * state.scale;
   const lineH = fontPx * CONFIG.textLineHeight;
-  const f = textFieldDom;
+  const f = S.textFieldDom;
   f.style.left = lay.x + "px";
   f.style.top = lay.y + "px";
   f.style.width = Math.max(lay.w, CONFIG.textFieldMinW) + "px";
@@ -483,19 +483,19 @@ function syncTextEditField() {
 // 不画边框：边框的四条边在这个尺度上会被读成压在字上、或字与字之间的一条横线，很难看；
 // 一块底色已经足够说明「正在这里编辑」，而且它的边界是颜色渐变的，不会被看成一笔线条
 function drawTextEditBox() {
-  if (!textEditing || textEditEl === null) return;
-  const m = textBlockMetrics(textEditEl);
-  const lay = textBlockLayout(textEditEl);
+  if (!S.textEditing || S.textEditEl === null) return;
+  const m = textBlockMetrics(S.textEditEl);
+  const lay = textBlockLayout(S.textEditEl);
   const basePx = CONFIG.textFontSize * state.scale;
   // 字号那一档当作最小宽度：内容还空着时也要有一小块看得见的范围，否则只看到一个孤零零的光标
   const w = Math.max(lay.w, basePx);
   const padX = basePx * CONFIG.textEditFillPadX;
   const padY = basePx * CONFIG.textEditFillPadY;
-  ctx.save();
-  ctx.globalAlpha = CONFIG.textEditFillAlpha;
-  ctx.fillStyle = COLOR.tipFill;
-  ctx.fillRect(lay.x - padX, lay.y - padY, w + padX * 2, m.inkH + padY * 2);
-  ctx.restore();
+  S.ctx.save();
+  S.ctx.globalAlpha = CONFIG.textEditFillAlpha;
+  S.ctx.fillStyle = COLOR.tipFill;
+  S.ctx.fillRect(lay.x - padX, lay.y - padY, w + padX * 2, m.inkH + padY * 2);
+  S.ctx.restore();
 }
 
 // 画原地输入的光标，以及输入法正在拼的那一段下面的下划线
@@ -503,34 +503,34 @@ function drawTextEditBox() {
 // 这样即使某一行是标题、字号与别行不同，光标也照样落在那个字的左边，也不会跑到行的上下沿去
 // 闪烁用真实时钟而不是帧计数：帧率有起伏时，闪烁的节奏不会跟着忽快忽慢
 function drawTextEditCaret() {
-  if (!textEditing || textEditEl === null) return;
-  const tx = textEditEl;
+  if (!S.textEditing || S.textEditEl === null) return;
+  const tx = S.textEditEl;
   const m = textBlockMetrics(tx);
   const lay = textBlockLayout(tx);
-  const n = textFieldDom.selectionStart;  // 输入框里的字符下标，与 text 的字符下标一一对应
+  const n = S.textFieldDom.selectionStart;  // 输入框里的字符下标，与 text 的字符下标一一对应
   const p = caretPointFromIndex(tx.text, m, n);
   const x = lay.x + p.x;
   const top = lay.y + p.top;
-  ctx.save();
+  S.ctx.save();
   // 输入法正在拼的那一段：在它下面画一条下划线，让人看得出这一截还没上屏
   // 纵向位置按这一行的字号算，落在这行字的下沿；长度由 compositionupdate 记下，从光标往回数那么多个字符
-  if (textEditImeLen > 0) {
-    const a = caretPointFromIndex(tx.text, m, Math.max(0, n - textEditImeLen));
+  if (S.textEditImeLen > 0) {
+    const a = caretPointFromIndex(tx.text, m, Math.max(0, n - S.textEditImeLen));
     const uy = top + p.fontPx * 1.06;
-    ctx.strokeStyle = COLOR.selectBorder;
-    ctx.lineWidth = Math.max(1, p.fontPx * CONFIG.textImeUnderlineRatio);
-    ctx.beginPath();
-    ctx.moveTo(lay.x + a.x, uy);
-    ctx.lineTo(x, uy);
-    ctx.stroke();
+    S.ctx.strokeStyle = COLOR.selectBorder;
+    S.ctx.lineWidth = Math.max(1, p.fontPx * CONFIG.textImeUnderlineRatio);
+    S.ctx.beginPath();
+    S.ctx.moveTo(lay.x + a.x, uy);
+    S.ctx.lineTo(x, uy);
+    S.ctx.stroke();
   }
   // 光标：一竖条，高取这一行的字号：字号才是字面的高度，拿行高来画会高出一大截，看着像一根杆子
   // 用真实时钟取模得到一个方波：前一段亮、后一段灭，周期与亮段都在 CONFIG 里
   if ((performance.now() % CONFIG.textCaretBlinkMs) < CONFIG.textCaretOnMs) {
-    ctx.fillStyle = COLOR.labelText;
-    ctx.fillRect(x, top + p.fontPx * 0.08, CONFIG.textCaretW, p.fontPx * 0.86);
+    S.ctx.fillStyle = COLOR.labelText;
+    S.ctx.fillRect(x, top + p.fontPx * 0.08, CONFIG.textCaretW, p.fontPx * 0.86);
   }
-  ctx.restore();
+  S.ctx.restore();
 }
 
 // 绑定原地输入框的事件，只做一次
@@ -538,34 +538,34 @@ function drawTextEditCaret() {
 // 普通按键不在这里处理：它们由浏览器按 textarea 的原生行为处理，这正是用真输入框而不是自造编辑器的原因
 function initTextField() {
   // 内容变了：立刻写进那块文字并重绘，所以染色、标题放大在打字过程中就是实时可见的
-  textFieldDom.addEventListener("input", function (e) {
-    if (!textEditing || textEditEl === null) return;
-    textEditEl.text = e.target.value;
+  S.textFieldDom.addEventListener("input", function (e) {
+    if (!S.textEditing || S.textEditEl === null) return;
+    S.textEditEl.text = e.target.value;
     syncTextEditField();  // 行数与最长行都变了，框要跟着长
-    sceneDirty = true;
+    S.sceneDirty = true;
   });
   // 输入法开始拼字：这一段还没上屏，先登记长度为 0，等 compositionupdate 给实际内容
-  textFieldDom.addEventListener("compositionstart", function () { textEditImeLen = 0; });
+  S.textFieldDom.addEventListener("compositionstart", function () { S.textEditImeLen = 0; });
   // 拼字中途：记下这一段有几个字符，供光标那一处画下划线
   // 顺手也写一次内容：个别浏览器在拼字期间的 input 时机不一致，这里补一道，保证画面跟得上
-  textFieldDom.addEventListener("compositionupdate", function (e) {
-    textEditImeLen = e.data === null || e.data === undefined ? 0 : e.data.length;
-    if (!textEditing || textEditEl === null) return;
-    textEditEl.text = e.target.value;
+  S.textFieldDom.addEventListener("compositionupdate", function (e) {
+    S.textEditImeLen = e.data === null || e.data === undefined ? 0 : e.data.length;
+    if (!S.textEditing || S.textEditEl === null) return;
+    S.textEditEl.text = e.target.value;
     syncTextEditField();
-    sceneDirty = true;
+    S.sceneDirty = true;
   });
   // 拼字结束（上屏或取消）：下划线撤掉
-  textFieldDom.addEventListener("compositionend", function (e) {
-    textEditImeLen = 0;
-    if (!textEditing || textEditEl === null) return;
-    textEditEl.text = e.target.value;
+  S.textFieldDom.addEventListener("compositionend", function (e) {
+    S.textEditImeLen = 0;
+    if (!S.textEditing || S.textEditEl === null) return;
+    S.textEditEl.text = e.target.value;
     syncTextEditField();
-    sceneDirty = true;
+    S.sceneDirty = true;
   });
   // 两个按键：Esc 放弃、Cmd / Ctrl + 回车收下
   // 不拦普通回车：多行文字里回车就是换行这个本意，要留给输入框自己处理
-  textFieldDom.addEventListener("keydown", function (e) {
+  S.textFieldDom.addEventListener("keydown", function (e) {
     if (e.code === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -579,8 +579,8 @@ function initTextField() {
     }
   });
   // 抬起拦下：全局键盘那条通道里也有 keyup，不让它跟着处理一次
-  textFieldDom.addEventListener("keyup", function (e) { e.stopPropagation(); });
+  S.textFieldDom.addEventListener("keyup", function (e) { e.stopPropagation(); });
   // 失去焦点：把这次输入当作收下
   // 有了这一条，点到侧边栏、点到按钮、切走标签页这些路径都不必各自记得去收尾，只有一处
-  textFieldDom.addEventListener("blur", function () { endTextEditing(true); });
+  S.textFieldDom.addEventListener("blur", function () { endTextEditing(true); });
 }

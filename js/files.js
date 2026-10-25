@@ -3,7 +3,7 @@
 
 // 把当前文件名写进弹窗：还没存过时用占位名，后缀始终带着，让人知道存出来会叫什么
 function refreshFileName() {
-  fileNameDom.textContent = currentFileName || ("未命名" + SAVE_EXT);
+  S.fileNameDom.textContent = S.currentFileName || ("未命名" + SAVE_EXT);
 }
 
 // 打开句柄库、记住句柄、读回句柄、起始目录这四件事都在 handle-store.js：
@@ -34,11 +34,11 @@ async function resumePendingScene() {
   // 句柄：首页已经把它写进同一个库、同一个键，上一句读完的 lastPickerHandle 就是刚选的那个文件
   // 这里把它接成「当前文件」，之后点保存仍然直接写回原文件，不必再去选一次
   if (lastPickerHandle !== null) {
-    currentFileHandle = lastPickerHandle;
-    currentFileName = lastPickerHandle.name;
+    S.currentFileHandle = lastPickerHandle;
+    S.currentFileName = lastPickerHandle.name;
     refreshFileName();
   }
-  console.log("[文件] 已接着打开 " + (currentFileName || "未命名") +
+  console.log("[文件] 已接着打开 " + (S.currentFileName || "未命名") +
     (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
 }
 
@@ -59,15 +59,15 @@ async function onOpenFile() {
   }
   rememberPickerHandle(handle);  // 记住这次所在的目录，下次打开框直接从这儿起步
   stashCurrentScene();  // 先把手上这份没保存的改动收起来，再换文档，否则它会被新读进来的内容顶掉
-  if (await openFromHandle(handle)) openFileNode = null;  // 从系统文件框打开的，列表里没有对应行，标记无处可标
+  if (await openFromHandle(handle)) S.openFileNode = null;  // 从系统文件框打开的，列表里没有对应行，标记无处可标
 }
 
 // 把当前这一份画面收进它所绑的那条存档里，只在它真有未保存的改动时才收
 // 收的是内存里的快照（与存档同一个结构），不碰磁盘：目的是让「切走再切回来」还能拿回这份改动，
 // 否则一切走，它就被磁盘上那份旧存档永久盖掉了
 function stashCurrentScene() {
-  if (openFileNode === null || !docDirty) return;
-  openFileNode.scene = serializeScene();
+  if (S.openFileNode === null || !S.docDirty) return;
+  S.openFileNode.scene = serializeScene();
 }
 
 // 一份已经校验过的存档落到画面上，并把「当前文件」绑到它的句柄上，成功返回 true
@@ -76,10 +76,10 @@ function adoptScene(handle, parsed) {
   if (!parsed.ok) { console.log("[文件] " + handle.name + "：" + parsed.reason); return false; }
   applyScene(parsed);
   // 确认用上了才改绑定：读失败时「当前文件」仍指向原来那个，不会显示成刚选的坏文件
-  currentFileHandle = handle;
-  currentFileName = handle.name;
+  S.currentFileHandle = handle;
+  S.currentFileName = handle.name;
   refreshFileName();
-  console.log("[文件] 已打开 " + currentFileName +
+  console.log("[文件] 已打开 " + S.currentFileName +
     (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
   return true;
 }
@@ -113,7 +113,7 @@ async function onSaveFileAs() {
   const t0 = performance.now();   // 保存框自己也可能要等：这一段单独计时，好与写盘那几段分开看
   try {
     handle = await window.showSaveFilePicker(Object.assign({
-      suggestedName: currentFileName || ("未命名" + SAVE_EXT),
+      suggestedName: S.currentFileName || ("未命名" + SAVE_EXT),
       types: SAVE_FILE_TYPES
     }, startInOption()));
   } catch (err) {
@@ -124,8 +124,8 @@ async function onSaveFileAs() {
   console.log("[文件] 保存框用时 " + Math.round(performance.now() - t0) + " ms");
   rememberPickerHandle(handle);  // 记住这次所在的目录，下次保存框直接从这儿起步
   // 名字和句柄一起记：两者说的都是「现在绑在哪个文件上」，要改就一起改，不能只改一个
-  currentFileHandle = handle;
-  currentFileName = handle.name;
+  S.currentFileHandle = handle;
+  S.currentFileName = handle.name;
   refreshFileName();
   await runSave();
 }
@@ -134,8 +134,8 @@ async function onSaveFileAs() {
 async function onSaveFile() {
   // 起手先记一行：这条路上若有几秒的迟滞，靠它才能分清是「按键没能及时进来」还是「写盘那几步慢」
   // 这一行是同步打出来的，它出现得晚，就说明问题在它之前，与下面几段无关
-  console.log("[文件] 保存开始：" + (currentFileHandle === null ? "尚未绑定文件，转另存为" : currentFileName));
-  if (currentFileHandle === null) { await onSaveFileAs(); return; }
+  console.log("[文件] 保存开始：" + (S.currentFileHandle === null ? "尚未绑定文件，转另存为" : S.currentFileName));
+  if (S.currentFileHandle === null) { await onSaveFileAs(); return; }
   await runSave();
 }
 
@@ -165,7 +165,7 @@ async function runSave() {
       const commit = pendingCommit;
       if (commit !== null) await commit;
       if (!saveAgain) return;                     // 期间没人再按，收工
-      if (!docDirty) return;                      // 期间没有新的改动，不必再写一遍
+      if (!S.docDirty) return;                      // 期间没有新的改动，不必再写一遍
     }
   } finally {
     savingNow = false;
@@ -195,33 +195,33 @@ async function writeCurrentFile() {
   const t0 = performance.now();
   // 先记下这一份写的是谁：收尾要好几秒，期间用户可能已经切到别的存档上去了，
   // 收尾回来时只认这个节点，结果才不会记到别人头上
-  const node = openFileNode;
+  const node = S.openFileNode;
   setNodeSaving(node, true);   // 圆点从这一刻起开始呼吸，但它只呼吸到这一趟写完为止
   let stream = null;   // 写流：写失败时必须在收尾里丢掉，否则它一直占着文件锁
   try {
-    if (!(await ensureWritePermission(currentFileHandle))) {
+    if (!(await ensureWritePermission(S.currentFileHandle))) {
       console.log("[文件] 没有写权限，本次保存放弃");
       return false;
     }
-    stream = await currentFileHandle.createWritable();
+    stream = await S.currentFileHandle.createWritable();
     const t1 = performance.now();
     const text = JSON.stringify(serializeScene());  // 不缩进：存档是给程序读的，缩进只是把文件撑大，没有别的好处
-    const editsAtWrite = docEditSeq;   // 这份内容对应到第几次改动，收尾回来时靠它判断期间有没有又改过
+    const editsAtWrite = S.docEditSeq;   // 这份内容对应到第几次改动，收尾回来时靠它判断期间有没有又改过
     await stream.write(text);
     const t2 = performance.now();
     // 走到这里整份内容已经在浏览器手里，界面上就算存好了：呼吸立刻停，未保存的标记立刻灭
     // 后面那几秒只是系统把临时文件换到原文件上，不该让圆点一直呼吸，也不该让人以为还没存
-    if (openFileNode === node && docEditSeq === editsAtWrite) docDirty = false;
+    if (S.openFileNode === node && S.docEditSeq === editsAtWrite) S.docDirty = false;
     setNodeSaving(node, false);
-    console.log("[文件] 已写入 " + currentFileName + "（" + text.length + " 字节，开流 " + Math.round(t1 - t0) +
+    console.log("[文件] 已写入 " + S.currentFileName + "（" + text.length + " 字节，开流 " + Math.round(t1 - t0) +
       " ms，写入 " + Math.round(t2 - t1) + " ms），收尾在后台进行");
     // 收尾交给后台：成功才丢掉内存里那份旧快照；失败就把未保存亮回去，不让界面说谎
     pendingCommit = stream.close().then(function () {
-      if (node !== null && openFileNode === node) node.scene = null;
+      if (node !== null && S.openFileNode === node) node.scene = null;
       console.log("[文件] 收尾完成：" + Math.round(performance.now() - t2) + " ms");
     }).catch(function (err) {
       console.log("[文件] 收尾失败，文件没有换成新的：", err);
-      docDirty = true;   // 圆点会按这个标记在下一帧重新亮起，syncSidebarDirty 每帧都会对照
+      S.docDirty = true;   // 圆点会按这个标记在下一帧重新亮起，syncSidebarDirty 每帧都会对照
     }).finally(function () {
       pendingCommit = null;
     });
@@ -339,7 +339,7 @@ async function onExportSelection() {
   let handle;
   try {
     // 默认名字跟着当前存档走，加个「-选区」后缀，连续导几个不同选区时不会互相覆盖
-    const base = currentFileName ? currentFileName.replace(/\.lccas$/i, "") : "未命名";
+    const base = S.currentFileName ? S.currentFileName.replace(/\.lccas$/i, "") : "未命名";
     handle = await window.showSaveFilePicker(Object.assign({
       suggestedName: base + "-选区" + SAVE_EXT,
       types: SAVE_FILE_TYPES
@@ -366,8 +366,8 @@ async function onExportSelection() {
 // 与存档的差别只有一条：存档不收悬空的元件，而剪贴板要的恰恰就是这批悬空的元件
 function serializeSelection() {
   const list = [];
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     if (!el.selected || el.deleting) continue;
     list.push(elementToRecord(el));
   }
@@ -381,7 +381,7 @@ function serializeSelection() {
 async function copySelection() {
   const payload = serializeSelection();
   if (payload.elements.length === 0) { console.log("[剪贴板] 没有选区，没东西可复制"); return; }
-  if (!canUseClipboard) { console.log("[剪贴板] 当前环境不支持写剪贴板"); return; }
+  if (!S.canUseClipboard) { console.log("[剪贴板] 当前环境不支持写剪贴板"); return; }
   try {
     await navigator.clipboard.writeText(JSON.stringify(payload));  // 不缩进：这份要能原样粘回来，不是给人看的
     console.log("[剪贴板] 已复制 " + payload.elements.length + " 个元件");
@@ -399,8 +399,8 @@ async function copySelection() {
 // 顺序沿用元件在画面上的先后，不另排序：同一份电路每次复制出来都一样，方便前后对照
 function serializeSceneText() {
   const list = [];
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     if (el.deleting) continue;   // 正在播放消失动画的元件不算数，写进去会凭空多出一个
     list.push(elementToRecord(el));
   }
@@ -419,8 +419,8 @@ function serializeSceneText() {
 // 这份只出不进，怎么省字怎么来，用不着迁就读档那一侧
 // 复制的是整份电路而不是选区：给 AI 看电路通常要它看到全貌，只给一半反而看不懂
 async function copyForAi() {
-  if (elements.length === 0) { console.log("[AI 文本] 画面上还没有元件，没东西可复制"); return; }
-  if (!canUseClipboard) { console.log("[AI 文本] 当前环境不支持写剪贴板"); return; }
+  if (S.elements.length === 0) { console.log("[AI 文本] 画面上还没有元件，没东西可复制"); return; }
+  if (!S.canUseClipboard) { console.log("[AI 文本] 当前环境不支持写剪贴板"); return; }
   const text = serializeSceneText();
   try {
     await navigator.clipboard.writeText(text);
@@ -452,8 +452,8 @@ function onPaste(e) {
   if (parsed.elements.length === 0) { console.log("[剪贴板] 剪贴板里没有可粘贴的元件"); return; }
   e.preventDefault();   // 确认要用了才拦默认行为，用不上时留给浏览器自己处理
   // 落点：指针在画布内就以指针所在格为中心，指针不在就退回视野中心
-  const target = pointerInside
-    ? { cx: cellCenterX(screenToWorldX(pointerSX)), cy: cellCenterY(screenToWorldY(pointerSY)) }
+  const target = S.pointerInside
+    ? { cx: cellCenterX(screenToWorldX(S.pointerSX)), cy: cellCenterY(screenToWorldY(S.pointerSY)) }
     : viewCenterCell();
   const n = addRecordsAsSelection(parsed.elements, target.cx, target.cy);
   console.log("[剪贴板] 已粘贴 " + n + " 个元件" +

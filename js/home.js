@@ -9,8 +9,7 @@
 
 /* ========== 状态变量（集中声明，含类型与默认值） ========== */
 
-let homeCanvas = null;      // HTMLCanvasElement|null：首页画布
-let ctx = null;             // CanvasRenderingContext2D|null：首页画布的 2D 上下文；icons.js 读的就是这个全局名
+let homeCanvas = null;      // HTMLCanvasElement|null：首页画布；它的 2D 上下文放在 S.ctx，icons.js 读的就是那个
 let homeW = 0;              // number：窗口宽（CSS px），也是画布宽
 let homeH = 0;              // number：窗口高（CSS px），也是画布高
 let homeLastTs = 0;         // number：上一帧的时间戳（毫秒），0 表示还没收到过帧
@@ -30,25 +29,11 @@ let homeAboutStyleDone = false; // boolean：关于窗的排版样式是否已�
 let homeDemoL = null;       // Object|null：左侧演示（非门）的运行时对象，见 demoCreate
 let homeDemoR = null;       // Object|null：右侧演示（或门）的运行时对象
 
-/* ========== 仿真环境：circuit.js 要读的那几个全局名 ========== */
+/* ========== 仿真环境 ========== */
 
-// circuit.js 是围绕这几个名字写的（在编辑器里它们声明于 state.js）。首页要跑同一份引擎，
-// 就得把同样的名字先声明出来，引擎才找得到元件表、阻挡图与结算结果；
-// 只是不引入 state.js 里那一大堆编辑状态（相机、选区、虚影、面板），那些与演示无关。
-let elements = [];        // Array<Object>：当前正在结算的那一侧的元件表，字段与编辑器里完全一致
-let rayGraph = {          // Object：阻挡图，引擎自己会填 rows / cols / endR / endL / endU 与 dirty
-  rows: new Map(), cols: new Map(),
-  endR: [], endL: [], endD: [], endU: [], dirty: true
-};
-let recvMask = [];        // Array<number>：接收掩码，引擎每算一次微帧都会写它
-let laserSegments = [];   // Array<Object>：本微帧的激光场线段，画激光读的就是它
-let lastEmit = null;      // Array<number>|null：上一微帧的发射掩码；置 null 强制引擎重算
-let microframe = 0;       // number：微帧计数，引擎会自增；首页不读它
-let sceneDirty = true;    // boolean：引擎要求存在的一个重绘标志位；首页不读它
-const SIDE_UP = 1;        // number：上侧位，与编辑器同一套位掩码
-const SIDE_RIGHT = 2;     // number：右侧位
-const SIDE_DOWN = 4;      // number：下侧位
-const SIDE_LEFT = 8;      // number：左侧位
+// 首页跑的是 circuit.js 那一套结算引擎，引擎读写的是 state.js 里那份共享状态容器；
+// index.html 因此也加载 state.js，首页不再自己伪造同名全局。
+// 两侧演示的元件表、阻挡图、激光线段与微帧计数都只是轮流覆盖 S 上对应的那几个字段。
 
 /* ========== 四个入口 ========== */
 
@@ -322,11 +307,11 @@ function demoApplyInputs(d, mf) {
 // 借完之后把结果抄回这一侧自己的对象上，另一侧再轮到它时不会互相踩
 function demoStepOnce(d) {
   demoApplyInputs(d, d.done);
-  elements = d.els;
-  rayGraph.dirty = true;
+  S.elements = d.els;
+  S.rayGraph.dirty = true;
   lastEmit = null;
   stepMicroframe();
-  d.segments = laserSegments;   // 引擎每次重算都会换一个新数组，直接引用是安全的
+  d.segments = S.laserSegments;   // 引擎每次重算都会换一个新数组，直接引用是安全的
   for (let i = 0; i < d.els.length; i++) {
     d.lit[i] = d.els[i].typeId === "lamp" && d.els[i].litIn ? 1 : 0;
   }
@@ -371,23 +356,23 @@ function updateHomeDemos(dt) {
 // 网格原点固定在窗口左上角，演示方框也按同一个格距取整落位，于是方框的四条边都落在格线上
 function drawGrid(cell) {
   const dpr = window.devicePixelRatio || 1;
-  ctx.fillStyle = COLOR.background;   // 整页底色取编辑器视口内那块底色，两个页面是同一个值
-  ctx.fillRect(0, 0, homeW, homeH);
-  ctx.save();
-  ctx.strokeStyle = COLOR.line;       // 网格线取编辑器里那条网格线的颜色
-  ctx.lineWidth = Math.max(1 / dpr, 0.5);   // 线取一个物理像素的当量，与编辑器里的网格同一档观感
-  ctx.beginPath();
+  S.ctx.fillStyle = COLOR.background;   // 整页底色取编辑器视口内那块底色，两个页面是同一个值
+  S.ctx.fillRect(0, 0, homeW, homeH);
+  S.ctx.save();
+  S.ctx.strokeStyle = COLOR.line;       // 网格线取编辑器里那条网格线的颜色
+  S.ctx.lineWidth = Math.max(1 / dpr, 0.5);   // 线取一个物理像素的当量，与编辑器里的网格同一档观感
+  S.ctx.beginPath();
   // 逐条描到窗口边界之外一条，四边不会留下没盖住的缝
   for (let x = 0; x <= homeW; x += cell) {
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, homeH);
+    S.ctx.moveTo(x, 0);
+    S.ctx.lineTo(x, homeH);
   }
   for (let y = 0; y <= homeH; y += cell) {
-    ctx.moveTo(0, y);
-    ctx.lineTo(homeW, y);
+    S.ctx.moveTo(0, y);
+    S.ctx.lineTo(homeW, y);
   }
-  ctx.stroke();
-  ctx.restore();
+  S.ctx.stroke();
+  S.ctx.restore();
 }
 
 /* ========== 绘制：两侧演示电路 ========== */
@@ -422,45 +407,45 @@ function drawDemoLaser(origin, cell, d, groupAlpha) {
   }
   // 端点可能是 ±Infinity（说明那一头没人挡），上面已经按方框四边夹过，路径里不会留下无穷大
   const w = CONFIG.laserWidth * cell;
-  ctx.save();
-  ctx.lineCap = "round";                      // 圆头：线段末端不出现生硬的方角
-  ctx.strokeStyle = COLOR.laserGlow;          // 辉光色取编辑器里那一束用的同一个颜色
+  S.ctx.save();
+  S.ctx.lineCap = "round";                      // 圆头：线段末端不出现生硬的方角
+  S.ctx.strokeStyle = COLOR.laserGlow;          // 辉光色取编辑器里那一束用的同一个颜色
   const N = CONFIG.laserGlowLayers;
   for (let k = 0; k < N; k++) {
     const t = k / N;                          // 0 贴着光芯，越接近 1 越靠外
     const fade = (1 - t) * (1 - t);            // 二次衰减：近处降得慢、远处迅速消失，观感更柔
-    ctx.lineWidth = w * (1 + (CONFIG.laserGlowSpread - 1) * t);
-    ctx.globalAlpha = groupAlpha * CONFIG.laserGlowAlpha * fade;
-    ctx.stroke(path);                         // 每层复用同一条路径，不重建
+    S.ctx.lineWidth = w * (1 + (CONFIG.laserGlowSpread - 1) * t);
+    S.ctx.globalAlpha = groupAlpha * CONFIG.laserGlowAlpha * fade;
+    S.ctx.stroke(path);                         // 每层复用同一条路径，不重建
   }
-  ctx.globalAlpha = groupAlpha;
-  ctx.lineWidth = w;
-  ctx.strokeStyle = COLOR.laserCore;          // 光芯色同上，与编辑器共用
-  ctx.stroke(path);
-  ctx.restore();
+  S.ctx.globalAlpha = groupAlpha;
+  S.ctx.lineWidth = w;
+  S.ctx.strokeStyle = COLOR.laserCore;          // 光芯色同上，与编辑器共用
+  S.ctx.stroke(path);
+  S.ctx.restore();
 }
 
 // 画被照亮的灯的光晕：用高斯模糊把灯的轮廓向外化开，而不是画一个圆形渐变
 // 圆形渐变与方形灯对不上，光晕在四角和四边深浅不一，看上去就是一圈能看出来的边界
 // 编辑器的做法是预生成一张模糊纹理逐盏贴图；这里最多四盏灯，每帧当场模糊一次即可，不必再维护一张纹理
 function drawDemoLampGlow(origin, cell, d, groupAlpha) {
-  if (typeof ctx.filter !== "string") return;   // 画布滤镜是标准能力，不支持就干脆不画，宁可没有光晕
+  if (typeof S.ctx.filter !== "string") return;   // 画布滤镜是标准能力，不支持就干脆不画，宁可没有光晕
   const h = CONFIG.lampHalf * cell;             // 光晕底形与灯同大，模糊后自然向外晕出
   const r = CONFIG.lampRadius * cell;
-  ctx.save();
-  ctx.filter = "blur(" + (CONFIG.lampGlowBlur * cell) + "px)";
-  ctx.fillStyle = COLOR.lampGlow;
+  S.ctx.save();
+  S.ctx.filter = "blur(" + (CONFIG.lampGlowBlur * cell) + "px)";
+  S.ctx.fillStyle = COLOR.lampGlow;
   for (let i = 0; i < d.els.length; i++) {
     const el = d.els[i];
     if (el.litP.cur <= 0.001) continue;         // 还没亮到看得见就跳过
     const p = { x: demoScreenX(origin, cell, el.wx), y: demoScreenY(origin, cell, el.wy) };
-    ctx.globalAlpha = groupAlpha * CONFIG.lampGlowAlpha * el.litP.cur;
-    ctx.beginPath();
-    ctx.roundRect(p.x - h, p.y - h, h * 2, h * 2, r);
-    ctx.fill();
+    S.ctx.globalAlpha = groupAlpha * CONFIG.lampGlowAlpha * el.litP.cur;
+    S.ctx.beginPath();
+    S.ctx.roundRect(p.x - h, p.y - h, h * 2, h * 2, r);
+    S.ctx.fill();
   }
-  ctx.filter = "none";
-  ctx.restore();
+  S.ctx.filter = "none";
+  S.ctx.restore();
 }
 
 // 画一个元件本体：平移到格心 → 按朝向旋转 → 按「一格为 1」缩放，之后一律用世界单位作图
@@ -468,40 +453,40 @@ function drawDemoLampGlow(origin, cell, d, groupAlpha) {
 // 轮廓取 element-types.js 的 traceElementPath，配色取 config.js 的 elementHSL 与 RGB：
 // 形状与配色都只有这一个出处，首页画的元件与编辑器里那一个逐点相同，不是照着重画的一份
 function drawDemoElement(origin, cell, el, groupAlpha) {
-  ctx.save();
-  ctx.translate(demoScreenX(origin, cell, el.wx), demoScreenY(origin, cell, el.wy));
-  ctx.rotate(el.dir * Math.PI / 2);
-  ctx.scale(cell, cell);
-  ctx.globalAlpha = groupAlpha;
-  ctx.lineJoin = "round";              // 圆角靠描边的圆角连接实现，与编辑器里元件那一套一致
-  ctx.lineWidth = CONFIG.elementStroke;
+  S.ctx.save();
+  S.ctx.translate(demoScreenX(origin, cell, el.wx), demoScreenY(origin, cell, el.wy));
+  S.ctx.rotate(el.dir * Math.PI / 2);
+  S.ctx.scale(cell, cell);
+  S.ctx.globalAlpha = groupAlpha;
+  S.ctx.lineJoin = "round";              // 圆角靠描边的圆角连接实现，与编辑器里元件那一套一致
+  S.ctx.lineWidth = CONFIG.elementStroke;
   if (el.typeId === "lamp") {
     // 灯另走一套：亮起时逐通道从元件蓝混向淡红，混法与编辑器里那盏灯完全一致
-    ctx.fillStyle = rgbCss(mixRgb(RGB.elementFill, RGB.lampFill, el.litP.cur));
-    ctx.strokeStyle = rgbCss(mixRgb(RGB.elementStroke, RGB.lampStroke, el.litP.cur));
+    S.ctx.fillStyle = rgbCss(mixRgb(RGB.elementFill, RGB.lampFill, el.litP.cur));
+    S.ctx.strokeStyle = rgbCss(mixRgb(RGB.elementStroke, RGB.lampStroke, el.litP.cur));
   } else {
-    ctx.fillStyle = hslCss(elementHSL.fill);
-    ctx.strokeStyle = hslCss(elementHSL.stroke);
+    S.ctx.fillStyle = hslCss(elementHSL.fill);
+    S.ctx.strokeStyle = hslCss(elementHSL.stroke);
   }
   traceElementPath(el.typeId);
-  ctx.stroke();   // 先描边后填充：描边内侧那半被填充盖住、只留外面一圈，与编辑器里各处画法一致
-  ctx.fill();
-  ctx.restore();
+  S.ctx.stroke();   // 先描边后填充：描边内侧那半被填充盖住、只留外面一圈，与编辑器里各处画法一致
+  S.ctx.fill();
+  S.ctx.restore();
 }
 
 // 画一侧演示：裁剪到演示方框（四边各放半格），层次从下往上——灯的光晕、激光、元件本体
 // 裁剪是必要的：激光的一端可能是 ±Infinity，不能让它顺着屏幕一直画出去
 function drawDemo(origin, cell, d, groupAlpha) {
   if (!d || groupAlpha <= 0.001) return;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(origin.x - cell * 0.5, origin.y - cell * 0.5,
+  S.ctx.save();
+  S.ctx.beginPath();
+  S.ctx.rect(origin.x - cell * 0.5, origin.y - cell * 0.5,
            origin.boxCols * cell + cell, origin.boxRows * cell + cell);
-  ctx.clip();
+  S.ctx.clip();
   drawDemoLampGlow(origin, cell, d, groupAlpha);
   drawDemoLaser(origin, cell, d, groupAlpha);
   for (let i = 0; i < d.els.length; i++) drawDemoElement(origin, cell, d.els[i], groupAlpha);
-  ctx.restore();
+  S.ctx.restore();
 }
 
 /* ========== 绘制：中间那一列 ========== */
@@ -512,13 +497,13 @@ function drawHomeTitle() {
   const size = titleFontPx();
   const x = homeW / 2;
   const y = columnTop() + size / 2;    // 竖列的顶边往下半个字号，正好是字的竖直中心
-  ctx.save();
-  ctx.font = HOME.titleWeight + " " + size + "px " + UI_FONT;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = COLOR.tipName;
-  ctx.fillText(HOME.titleText, x, y);
-  ctx.restore();
+  S.ctx.save();
+  S.ctx.font = HOME.titleWeight + " " + size + "px " + UI_FONT;
+  S.ctx.textAlign = "center";
+  S.ctx.textBaseline = "middle";
+  S.ctx.fillStyle = COLOR.tipName;
+  S.ctx.fillText(HOME.titleText, x, y);
+  S.ctx.restore();
 }
 
 // 画副标题：压在标题下面一行，同样水平居中
@@ -529,13 +514,13 @@ function drawHomeSubtitle() {
   const x = homeW / 2;
   // 顶边接在标题那一块之下：标题高加两者之间的间隔，再往下半个字号正好是它的竖直中心
   const y = columnTop() + titleFontPx() + HOME.titleSubtitleGap + size / 2;
-  ctx.save();
-  ctx.font = HOME.subtitleWeight + " " + size + "px " + UI_FONT;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = COLOR.tipDesc;
-  ctx.fillText(HOME.subtitleText, x, y);
-  ctx.restore();
+  S.ctx.save();
+  S.ctx.font = HOME.subtitleWeight + " " + size + "px " + UI_FONT;
+  S.ctx.textAlign = "center";
+  S.ctx.textBaseline = "middle";
+  S.ctx.fillStyle = COLOR.tipDesc;
+  S.ctx.fillText(HOME.subtitleText, x, y);
+  S.ctx.restore();
 }
 
 // 画四个入口：每行是一块水平居中的圆角底板，图标与文字合成一组、在底板里居中
@@ -548,31 +533,31 @@ function drawHomeEntries() {
     const a = homeEntryAnim[i];
     const label = HOME_ENTRIES[i].label;
     // 先量一次标签宽度：图标 + 间隔 + 文字合成一组，由组的宽度反推起笔位置，组才在底板里居中
-    ctx.save();
-    ctx.font = HOME.entryTextWeight + " " + HOME.entryTextSize + "px " + UI_FONT;
-    const textW = ctx.measureText(label).width;
-    ctx.restore();
+    S.ctx.save();
+    S.ctx.font = HOME.entryTextWeight + " " + HOME.entryTextSize + "px " + UI_FONT;
+    const textW = S.ctx.measureText(label).width;
+    S.ctx.restore();
     const groupW = box + HOME.entryIconTextGap + textW;
-    ctx.save();
-    ctx.translate(r.x + r.w / 2, r.y + r.h / 2);   // 原点落在底板中心，缩放就绕这里进行
-    ctx.scale(a.scale.cur, a.scale.cur);
+    S.ctx.save();
+    S.ctx.translate(r.x + r.w / 2, r.y + r.h / 2);   // 原点落在底板中心，缩放就绕这里进行
+    S.ctx.scale(a.scale.cur, a.scale.cur);
     // 一、底板：填充在常态色与悬停色之间连续过渡，描边只给底板封个边
-    ctx.beginPath();
-    ctx.roundRect(-r.w / 2, -r.h / 2, r.w, r.h, HOME.entryRadius);
-    ctx.fillStyle = rgbCss(mixRgb(homeEntryFillRgb, homeEntryFillHoverRgb, a.fill.cur));
-    ctx.fill();
-    ctx.lineWidth = HOME.entryBorderWidth;
-    ctx.strokeStyle = COLOR.slotBorder;   // 底板描边取编辑器选项槽那一圈描边色
-    ctx.stroke();
+    S.ctx.beginPath();
+    S.ctx.roundRect(-r.w / 2, -r.h / 2, r.w, r.h, HOME.entryRadius);
+    S.ctx.fillStyle = rgbCss(mixRgb(homeEntryFillRgb, homeEntryFillHoverRgb, a.fill.cur));
+    S.ctx.fill();
+    S.ctx.lineWidth = HOME.entryBorderWidth;
+    S.ctx.strokeStyle = COLOR.slotBorder;   // 底板描边取编辑器选项槽那一圈描边色
+    S.ctx.stroke();
     // 二、图标与文字：整组以底板中心为基准居中，图标在外框里按 icons.js 那套画法画
     const gx = -groupW / 2;
     HOME_ENTRIES[i].icon({ x: gx, y: -box / 2, w: box, h: box }, HOME.entryIconScale);
-    ctx.font = HOME.entryTextWeight + " " + HOME.entryTextSize + "px " + UI_FONT;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = rgbCss(mixRgb(homeTextRgb, homeTextHoverRgb, a.text.cur));
-    ctx.fillText(label, gx + box + HOME.entryIconTextGap, 0);
-    ctx.restore();
+    S.ctx.font = HOME.entryTextWeight + " " + HOME.entryTextSize + "px " + UI_FONT;
+    S.ctx.textAlign = "left";
+    S.ctx.textBaseline = "middle";
+    S.ctx.fillStyle = rgbCss(mixRgb(homeTextRgb, homeTextHoverRgb, a.text.cur));
+    S.ctx.fillText(label, gx + box + HOME.entryIconTextGap, 0);
+    S.ctx.restore();
   }
 }
 
@@ -840,7 +825,7 @@ function resizeHomeCanvas() {
   homeCanvas.height = Math.round(homeH * dpr);
   homeCanvas.style.width = homeW + "px";
   homeCanvas.style.height = homeH + "px";
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // 这里设一次，之后所有绘制都用 CSS 像素坐标，高清屏才不会糊
+  S.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // 这里设一次，之后所有绘制都用 CSS 像素坐标，高清屏才不会糊
 }
 
 // 初始化：拿上下文 → 定画布尺寸 → 备好配色与缓动 → 建两个弹窗与两侧演示 → 绑事件 → 启动主循环
@@ -848,7 +833,7 @@ function initHome() {
   // 第一句就摆好遮挡层：它必须从第一帧起就在，晚了就盖不住「网格与标题都还没画出来」的那一瞬
   initBootScreen();
   homeCanvas = document.getElementById("homeCanvas");
-  ctx = homeCanvas.getContext("2d");
+  S.ctx = homeCanvas.getContext("2d");
   resizeHomeCanvas();
   homeTextRgb = hexToRgb(COLOR.tipDesc);              // 入口文字的两种颜色先拆成数值，逐帧混合时不必再解析
   homeTextHoverRgb = hexToRgb(COLOR.tipName);         // 两档都取 COLOR 里已经有的文字色

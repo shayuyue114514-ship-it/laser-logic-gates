@@ -90,13 +90,16 @@ css/fonts/            子集化后的 MiSans，两个 woff2，对应 400 与 700
 js/util.js            缓动曲线、数值钳制、坐标互转、颜色换算，必须最先加载
 js/config.js          所有可调参数的集中登记处
 js/element-types.js   元件类型表与形状几何
-js/state.js           全部状态变量的集中声明处
+js/state.js           全部可变状态的唯一容器 S，两个页面共用同一份
 js/handle-store.js    存档类型声明与文件句柄记忆，两个页面共用
 js/render-scene.js    视口、网格、激光、面板框、底栏的绘制
 js/render-panel.js    选项槽、图标、元件槽、简介浮层的绘制
 js/scene.js           电路与视野的序列化、反序列化与校验
 js/ui.js              弹窗的 DOM 初始化
-js/sidebar.js         左侧竖栏的工作区与存档列表，以及列表上的右键新建与删除
+js/sidebar.js         左侧竖栏的工作区与存档列表
+js/sidebar-icons.js   竖栏里的小图标
+js/sidebar-menu.js    列表上的右键菜单、子列表与删除条目
+js/sidebar-rename.js  就地更改文件名
 js/files.js           文件读写与剪贴板
 js/settings.js        运行速度滑块与两个开关
 js/slots.js           选项槽的命中判定与动画

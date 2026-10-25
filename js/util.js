@@ -8,7 +8,7 @@
 // 高于设备像素比就是超采样、更锐也更费，低于它就是省像素、略软，两种意图都该照做
 // 全部按像素比开位图的地方都必须走它，任何一处自己读设备像素比都会和画布对不上、贴图错位
 function effectiveDpr() {
-  return renderScaleCap;
+  return S.renderScaleCap;
 }
 
 // 把 v 限制在 [lo, hi] 区间，用于钳制缩放范围
@@ -209,7 +209,7 @@ function profReport(nowMs, frameMs) {
   rows.sort(function (a, b) { return b.avg - a.avg; });
   const avgFrame = frameMs > 0 ? frameMs : sum;   // 整帧耗时拿不到时退回各阶段之和，百分比仍有分母
   console.log("[帧耗时] 整帧脚本 " + avgFrame.toFixed(2) + "ms  帧率 " + (profFrames * 1000 / span).toFixed(1) +
-    "  元件 " + elements.length + "  活跃 " + activeEls.length);
+    "  元件 " + S.elements.length + "  活跃 " + S.activeEls.length);
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (r.avg < 0.02) continue;   // 小到看不出来的阶段不占版面

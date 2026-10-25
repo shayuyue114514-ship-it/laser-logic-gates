@@ -65,10 +65,10 @@ function writeLabelRecord(el, rec) {
 // 把元件挂回画面：数据回到列表即可；已经在列表里的只补状态，不重复插入
 // 元件直接画在画布上，没有节点要挂；撤销回来的元件一律是落定状态，不会带着悬空身份复活
 function attachElement(el) {
-  if (elements.indexOf(el) < 0) {
-    elements.push(el);
+  if (S.elements.indexOf(el) < 0) {
+    S.elements.push(el);
     indexElement(el);      // 挂回元件表的同时挂回格子索引，按格查元件才不会漏掉它
-    rayGraph.dirty = true; // 下标变了，阻挡图与结算缓冲下一微帧会一起重建
+    S.rayGraph.dirty = true; // 下标变了，阻挡图与结算缓冲下一微帧会一起重建
   }
   el.selected = false;
   el.deleting = false;  // 撤销删除时元件可能还在播消失动画，不清掉的话动画会接着放完、把它真的摘走
@@ -82,14 +82,14 @@ function attachElement(el) {
 // 把元件从画面摘掉：数据出列表，同时从拖动组里除名
 // 摘掉只是「离开画面」，元件对象还被历史里的差分引用着，撤销时原样挂回去
 function detachElement(el) {
-  const i = elements.indexOf(el);
+  const i = S.elements.indexOf(el);
   if (i >= 0) {
     unindexElement(el);    // 先从格子索引里退掉，它那一格随它一起离开画面
-    elements.splice(i, 1);
-    rayGraph.dirty = true; // 下标变了，阻挡图与结算缓冲下一微帧会一起重建
+    S.elements.splice(i, 1);
+    S.rayGraph.dirty = true; // 下标变了，阻挡图与结算缓冲下一微帧会一起重建
   }
-  const g = moveGroup.indexOf(el);
-  if (g >= 0) moveGroup.splice(g, 1);
+  const g = S.moveGroup.indexOf(el);
+  if (g >= 0) S.moveGroup.splice(g, 1);
   el.selected = false;
 }
 
@@ -99,11 +99,11 @@ function detachElement(el) {
 // 浮动文本那张表也一并重建：文字没有「悬空」这回事，画面上的每一块就是它落定的样子
 function rebuildCommittedTable() {
   const next = new Map();
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     if (el.deleting) continue;
     if (el.selected) {
-      const prev = committedTable.get(el.id);
+      const prev = S.committedTable.get(el.id);
       // 悬空期间新来的（粘贴、导入）本来就不在表里，不建条目
       // 已经在表里的：位置与朝向沿用进悬空前的旧记录（取消悬空时要靠它摆回原位），但标签三项换成当前的
       // 不换的话，下一次改标签会拿一个过时的基准去比，撤销时会一次退掉两步
@@ -112,10 +112,10 @@ function rebuildCommittedTable() {
     }
     next.set(el.id, { rec: elementToRecord(el), el: el });
   }
-  committedTable = next;
+  S.committedTable = next;
   const nextTexts = new Map();
-  for (let i = 0; i < texts.length; i++) nextTexts.set(texts[i].id, { rec: textToRecord(texts[i]), tx: texts[i] });
-  committedTextTable = nextTexts;
+  for (let i = 0; i < S.texts.length; i++) nextTexts.set(S.texts[i].id, { rec: textToRecord(S.texts[i]), tx: S.texts[i] });
+  S.committedTextTable = nextTexts;
 }
 
 // 记一步：把这一刻的画面与上一次落定时逐条比，差异就是这一步
@@ -125,12 +125,12 @@ function rebuildCommittedTable() {
 function commitHistory() {
   const ops = [];
   const seen = new Set();
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     if (el.deleting) continue;  // 正在消失的元件已经不算电路里的人，会被下面那条「摘下去」认领
     seen.add(el.id);
     const rec = elementToRecord(el);
-    const prev = committedTable.get(el.id);
+    const prev = S.committedTable.get(el.id);
     if (el.selected) {
       // 悬空中的元件：位置与朝向还没定下来，整条留到落地那一刻再比 —— 对照表也要替它留着进悬空前的记录，
       // 取消悬空时要靠那份旧记录把元件摆回原位。
@@ -145,32 +145,32 @@ function commitHistory() {
     if (prev === undefined) ops.push({ kind: "attach", el: el, after: rec });
     else if (!recordEquals(prev.rec, rec)) ops.push({ kind: "set", el: el, before: prev.rec, after: rec });
   }
-  committedTable.forEach(function (v, id) {
+  S.committedTable.forEach(function (v, id) {
     // 消失的元件按它「离开那一刻」的样子记，而不是上一次落定的样子：
     // 它可能在悬空期间被搬动过，撤销删除时应该回到用户最后看到的位置
     if (!seen.has(id)) ops.push({ kind: "detach", el: v.el, before: elementToRecord(v.el) });
   });
   const seenTexts = new Set();
-  for (let i = 0; i < texts.length; i++) {
-    const tx = texts[i];
+  for (let i = 0; i < S.texts.length; i++) {
+    const tx = S.texts[i];
     seenTexts.add(tx.id);
     const rec = textToRecord(tx);
-    const prev = committedTextTable.get(tx.id);
+    const prev = S.committedTextTable.get(tx.id);
     if (prev === undefined) ops.push({ kind: "textAttach", tx: tx, after: rec });
     else if (!textRecordEquals(prev.rec, rec)) ops.push({ kind: "textSet", tx: tx, before: prev.rec, after: rec });
   }
-  committedTextTable.forEach(function (v, id) {
+  S.committedTextTable.forEach(function (v, id) {
     if (!seenTexts.has(id)) ops.push({ kind: "textDetach", tx: v.tx, before: textToRecord(v.tx) });
   });
   if (ops.length === 0) return;  // 没有真实变化就不占一步，免得空点一下也吃满一百步
   // 电路结构确实变了：元件缓存位图里存的是上一次的样子，整张作废，下一帧重画
   invalidateElementCache();
-  docDirty = true;  // 画面确实变了：从这一刻起它与磁盘上的存档不再一致，列表上那一条要标出未保存
-  docEditSeq++;     // 记下改动序号：保存时靠它判断写出去的那份之后有没有又改过
-  historyStack.length = historyIndex + 1;  // 在历史中间做了新动作，后面的重做分支作废
-  historyStack.push(ops);
-  historyIndex = historyStack.length - 1;
-  if (historyStack.length > HISTORY_LIMIT) { historyStack.shift(); historyIndex--; }
+  S.docDirty = true;  // 画面确实变了：从这一刻起它与磁盘上的存档不再一致，列表上那一条要标出未保存
+  S.docEditSeq++;     // 记下改动序号：保存时靠它判断写出去的那份之后有没有又改过
+  S.historyStack.length = S.historyIndex + 1;  // 在历史中间做了新动作，后面的重做分支作废
+  S.historyStack.push(ops);
+  S.historyIndex = S.historyStack.length - 1;
+  if (S.historyStack.length > S.HISTORY_LIMIT) { S.historyStack.shift(); S.historyIndex--; }
   rebuildCommittedTable();
 }
 
@@ -203,43 +203,43 @@ function applyOps(ops, reverse) {
       writeRecord(op.el, reverse ? op.before : op.after);
     }
   }
-  rayGraph.dirty = true;  // 元件增删或字段变了，谁挡谁与激光场都得重算
-  sceneDirty = true;
-  docDirty = true;  // 撤销与重做同样在改画面：改完就与磁盘上那份不一样了，未保存的标记照旧要亮
-  docEditSeq++;     // 撤销与重做也算一次改动，序号照加：它们同样改变了画面内容
+  S.rayGraph.dirty = true;  // 元件增删或字段变了，谁挡谁与激光场都得重算
+  S.sceneDirty = true;
+  S.docDirty = true;  // 撤销与重做同样在改画面：改完就与磁盘上那份不一样了，未保存的标记照旧要亮
+  S.docEditSeq++;     // 撤销与重做也算一次改动，序号照加：它们同样改变了画面内容
 }
 
 // 撤销/重做前先把正在进行的交互收干净：拖动、拉框、拖标签、拖浮动文本、公转全部中断
 // 不回退它们已经造成的画面状态，因为紧接着的撤销/重做会把画面整个摆正
 function settleInteractions() {
-  moveDragging = false;
-  movePointerId = -1;
-  moveDGX = 0;
-  moveDGY = 0;
-  moveGroup.length = 0;
-  marqueePressing = false;
-  marqueeActive = false;
-  marqueePointerId = -1;
-  labelDragging = false;
-  labelDragActive = false;
-  labelPointerId = -1;
-  labelDragEl = null;
-  textDragging = false;
-  textDragActive = false;
-  textPointerId = -1;
-  textDragEl = null;
+  S.moveDragging = false;
+  S.movePointerId = -1;
+  S.moveDGX = 0;
+  S.moveDGY = 0;
+  S.moveGroup.length = 0;
+  S.marqueePressing = false;
+  S.marqueeActive = false;
+  S.marqueePointerId = -1;
+  S.labelDragging = false;
+  S.labelDragActive = false;
+  S.labelPointerId = -1;
+  S.labelDragEl = null;
+  S.textDragging = false;
+  S.textDragActive = false;
+  S.textPointerId = -1;
+  S.textDragEl = null;
   // 原地输入中的浮动文本一并收掉，且按「放弃」收：紧接着的撤销/重做会把画面整个摆正，
   // 若在这里把它当成一次新改动记一步，就会在撤销的途中又插进一条历史
-  if (textEditing) endTextEditing(false);
-  orbitActive = false;
-  orbitP = 0;
-  orbitTurns = 0;
-  for (let i = 0; i < elements.length; i++) {
+  if (S.textEditing) endTextEditing(false);
+  S.orbitActive = false;
+  S.orbitP = 0;
+  S.orbitTurns = 0;
+  for (let i = 0; i < S.elements.length; i++) {
     // 公转起点与拖动偏移只存在元件身上，不逐个清掉会留下半截姿态
-    elements[i].orbitU0 = null;
-    elements[i].orbitV0 = null;
-    elements[i].mvOffU = 0;
-    elements[i].mvOffV = 0;
+    S.elements[i].orbitU0 = null;
+    S.elements[i].orbitV0 = null;
+    S.elements[i].mvOffU = 0;
+    S.elements[i].mvOffV = 0;
   }
 }
 
@@ -250,11 +250,11 @@ function settleInteractions() {
 function cancelFloat() {
   let any = false;
   // 倒序遍历：摘掉当前项会让后面所有下标前移，倒着走不会漏掉还没处理的项
-  for (let i = elements.length - 1; i >= 0; i--) {
-    const el = elements[i];
+  for (let i = S.elements.length - 1; i >= 0; i--) {
+    const el = S.elements[i];
     if (!el.selected || el.deleting) continue;
     any = true;
-    const prev = committedTable.get(el.id);
+    const prev = S.committedTable.get(el.id);
     if (prev === undefined) detachElement(el);
     else writeRecord(el, prev.rec);
   }
@@ -267,29 +267,29 @@ function cancelFloat() {
 // 撤销：手上有悬空就先把它取消（这一步不进历史），否则往回退一步
 function undo() {
   if (cancelFloat()) return;
-  if (historyIndex < 0) return;
+  if (S.historyIndex < 0) return;
   settleInteractions();
-  applyOps(historyStack[historyIndex], true);
-  historyIndex--;
+  applyOps(S.historyStack[S.historyIndex], true);
+  S.historyIndex--;
   rebuildCommittedTable();  // 电路已经变了，对照表必须跟着换，否则下一次记步会算出假差异
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 
 // 重做：与撤销对称，手上有悬空同样先取消，再往前恢复一步
 function redo() {
   if (cancelFloat()) return;
-  if (historyIndex + 1 >= historyStack.length) return;
+  if (S.historyIndex + 1 >= S.historyStack.length) return;
   settleInteractions();
-  historyIndex++;
-  applyOps(historyStack[historyIndex], false);
+  S.historyIndex++;
+  applyOps(S.historyStack[S.historyIndex], false);
   rebuildCommittedTable();
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 
 // 换文档（打开文件）后历史跟着清空：换文档不是编辑动作，留着上一条电路的历史只会撤出莫名其妙的画面
 function resetHistory() {
-  historyStack = [];
-  historyIndex = -1;
+  S.historyStack = [];
+  S.historyIndex = -1;
   rebuildCommittedTable();
 }
 

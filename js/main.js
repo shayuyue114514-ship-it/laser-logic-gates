@@ -15,7 +15,7 @@ function frame(ts) {
   t0 = pt(); rebuildActiveEls(); pe("重建活跃表", t0);
   t0 = pt(); updateDeletions(dt);
   // 有元件刚放完消失动画就统一压实一次：摘掉之后元件下标全变，活跃表要跟着重建
-  if (pendingCompact) { compactElements(); rebuildActiveEls(); }
+  if (S.pendingCompact) { compactElements(); rebuildActiveEls(); }
   pe("删除与压实", t0);
   t0 = pt(); updateElementRotations(dt); updateSelectionAnim(dt); updateLampAnim(dt); updateMoveAnim(dt); updateOrbit(dt);
   pe("元件动画推进", t0);
@@ -26,10 +26,10 @@ function frame(ts) {
   // 静止判定放在全部更新之后：静止、上帧也静止、又没有待重绘的变更时，整帧跳过渲染
   // 动画收尾那一帧上帧还不是静止，所以最终状态一定会被画出来，不会卡在中间态
   t0 = pt(); const settled = isSceneSettled(); pe("静止判定", t0);
-  if (sceneDirty || !settled || !prevSettled) { render(); pcount("渲染帧", 1); }
+  if (S.sceneDirty || !settled || !S.prevSettled) { render(); pcount("渲染帧", 1); }
   else pcount("跳帧", 1);
-  prevSettled = settled;
-  sceneDirty = false;
+  S.prevSettled = settled;
+  S.sceneDirty = false;
   markBootFrame();   // 首帧到此画完，遮挡层可以走了；boot.js 只认第一次，之后每帧再报都立刻回头
   const scriptEnd = performance.now();
   accumulatePerf(ts, scriptEnd - scriptStart);  // 读数只统计脚本耗时，浏览器的合成与空闲时间不计在内
@@ -41,8 +41,8 @@ function frame(ts) {
 function init() {
   // 第一句就摆好遮挡层：它必须从第一帧起就在，晚了就盖不住「画布还空着、竖栏还没摆好」的那一瞬
   initBootScreen();
-  canvas = document.getElementById("gridCanvas");
-  ctx = canvas.getContext("2d");
+  S.canvas = document.getElementById("gridCanvas");
+  S.ctx = S.canvas.getContext("2d");
   resizeCanvas();
   initSidebarDom();  // 先把竖栏的宽度定下来：复位视图时要按「让出竖栏之后」的视口居中
   setupSidebarTree();  // 再把存档列表画出来并接上开合；列表目前是一份示意结构，不接任何真实文件
@@ -67,7 +67,7 @@ function init() {
   // 自带的 MiSans 排在样式表之后取：@font-face 就登记在那份样式表里，它没到之前点名取字只会立刻返回空
   // 取到之后标一次脏，下一帧按 MiSans 重画首帧上那些字；顺带报一句「字体落定」给遮挡层
   // 取不到字体也不耽误页面先跑起来，遮挡层那边另有兜底时间
-  whenBootCssReady().then(loadUIFonts).then(() => { sceneDirty = true; markBootFonts(); });
+  whenBootCssReady().then(loadUIFonts).then(() => { S.sceneDirty = true; markBootFonts(); });
 }
 
 init();

@@ -7,14 +7,14 @@
 // 同步元件层的尺寸与裁剪矩形：这一层现在只装虚影，但虚影同样只该出现在视口内，裁剪规则与元件一致
 function resizeElementLayer() {
   const vp = getViewport();
-  elemLayer.setAttribute("width", state.cssW);
-  elemLayer.setAttribute("height", state.cssH);
-  elemLayer.style.width = state.cssW + "px";
-  elemLayer.style.height = state.cssH + "px";
-  clipRect.setAttribute("x", vp.x);
-  clipRect.setAttribute("y", vp.y);
-  clipRect.setAttribute("width", vp.w);
-  clipRect.setAttribute("height", vp.h);
+  S.elemLayer.setAttribute("width", state.cssW);
+  S.elemLayer.setAttribute("height", state.cssH);
+  S.elemLayer.style.width = state.cssW + "px";
+  S.elemLayer.style.height = state.cssH + "px";
+  S.clipRect.setAttribute("x", vp.x);
+  S.clipRect.setAttribute("y", vp.y);
+  S.clipRect.setAttribute("width", vp.w);
+  S.clipRect.setAttribute("height", vp.h);
 }
 
 // 给一个形状节点套上元件通用外观：填充、描边、圆角连接、先描边后填充、整体透明度
@@ -51,7 +51,7 @@ function findElementAt(wx, wy) {
 // 这个顺序和绘制顺序完全一致（选中的会被挪到元件层末尾），所以「看到谁在最上面就命中谁」，
 // 命中结果不会和画面矛盾；同层取数组里靠后的，也和绘制顺序对齐
 function topElementAtCell(wx, wy) {
-  const arr = cellIndex.get(cellKeyOf(Math.floor(wx), Math.floor(wy)));
+  const arr = S.cellIndex.get(cellKeyOf(Math.floor(wx), Math.floor(wy)));
   if (arr === undefined) return null;
   let best = null;
   let bestRank = -1;
@@ -70,7 +70,7 @@ function topElementAtCell(wx, wy) {
 // 元件不再建 SVG 节点：形状由渲染那一步直接画到画布上，这里只备好数据与几项绘制缓存
 function placeElement(wx, wy, dir, typeId) {
   const el = {
-    id: nextElementId++,  // 内部编号：只用来在历史差分里认人，不写进存档；换文档时随新元件重新发号
+    id: S.nextElementId++,  // 内部编号：只用来在历史差分里认人，不写进存档；换文档时随新元件重新发号
     wx: wx, wy: wy, dir: dir, typeId: typeId,
     angle: dir * 90, angleTarget: dir * 90,  // 初始角度就是放置时的朝向，动画从静止开始
     deleting: false, deleteP: 0,
@@ -107,10 +107,10 @@ function placeElement(wx, wy, dir, typeId) {
     labelAngle: CONFIG.labelAngleDefault,   // number：标签方位角（度），0 上、90 右、180 下、270 左，与元件朝向同一套
     labelGap: CONFIG.labelGapDefault        // number：文字外框离元件格心最近的那一点到格心的距离（世界单位）
   };
-  elements.push(el);
+  S.elements.push(el);
   indexElement(el);       // 同时挂进格子索引：按格查元件从此一步直达，不必扫全表
-  rayGraph.dirty = true;  // 元件增删会打乱 elements 下标，阻挡图必须重建
-  sceneDirty = true;      // 新元件要画出来，强制重绘一次
+  S.rayGraph.dirty = true;  // 元件增删会打乱 elements 下标，阻挡图必须重建
+  S.sceneDirty = true;      // 新元件要画出来，强制重绘一次
   return el;              // 交给调用方接着改字段（读档要还原光源开关），省得再回头查一遍
 }
 
@@ -122,7 +122,7 @@ function placeElementAtScreen(screenX, screenY) {
   // 一个格子最多一个元件，这是基本逻辑里的硬约束
   if (findElementAt(wx, wy) !== null) return;
   // 朝向取虚影当前的目标角度：目标角度永远是 90 的整数倍，取模得到 0 上 1 右 2 下 3 左
-  const dir = ((Math.round(ghostAngleTarget / 90) % 4) + 4) % 4;
+  const dir = ((Math.round(S.ghostAngleTarget / 90) % 4) + 4) % 4;
   // 类型取当前选中的槽：放下去的就是手上那个虚影，形状与预览完全一致
   // 手上拿的是选中工具时没有元件可放，回车直接不响应
   const typeId = selectedTypeId();
@@ -162,19 +162,19 @@ function cellKeyOf(gx, gy) {
 // 把一个元件挂进它所在的格
 function indexElement(el) {
   const key = cellKeyOf(Math.floor(el.wx), Math.floor(el.wy));
-  const arr = cellIndex.get(key);
-  if (arr === undefined) cellIndex.set(key, [el]);
+  const arr = S.cellIndex.get(key);
+  if (arr === undefined) S.cellIndex.set(key, [el]);
   else arr.push(el);
 }
 
 // 把元件从它所在的格里摘掉
 function unindexElement(el) {
   const key = cellKeyOf(Math.floor(el.wx), Math.floor(el.wy));
-  const arr = cellIndex.get(key);
+  const arr = S.cellIndex.get(key);
   if (arr === undefined) return;
   const i = arr.indexOf(el);
   if (i >= 0) arr.splice(i, 1);
-  if (arr.length === 0) cellIndex.delete(key);   // 空格子连键一起删掉，索引里不留一堆空数组
+  if (arr.length === 0) S.cellIndex.delete(key);   // 空格子连键一起删掉，索引里不留一堆空数组
 }
 
 // 元件挪了格：按旧格号摘、按新格号挂。调用方要在改 wx/wy 之前先把旧值记下来传进来
@@ -182,21 +182,21 @@ function reindexElement(el, oldWx, oldWy) {
   const oldKey = cellKeyOf(Math.floor(oldWx), Math.floor(oldWy));
   const newKey = cellKeyOf(Math.floor(el.wx), Math.floor(el.wy));
   if (oldKey === newKey) return;   // 还在同一格里，索引不必动
-  const oldArr = cellIndex.get(oldKey);
+  const oldArr = S.cellIndex.get(oldKey);
   if (oldArr !== undefined) {
     const i = oldArr.indexOf(el);
     if (i >= 0) oldArr.splice(i, 1);
-    if (oldArr.length === 0) cellIndex.delete(oldKey);
+    if (oldArr.length === 0) S.cellIndex.delete(oldKey);
   }
-  const newArr = cellIndex.get(newKey);
-  if (newArr === undefined) cellIndex.set(newKey, [el]);
+  const newArr = S.cellIndex.get(newKey);
+  if (newArr === undefined) S.cellIndex.set(newKey, [el]);
   else newArr.push(el);
 }
 
 // 整张索引推倒重建：清空电路、批量读档这类「一次动很多」的场合用它，比逐条摘挂更省事
 function rebuildCellIndex() {
-  cellIndex.clear();
-  for (let i = 0; i < elements.length; i++) indexElement(elements[i]);
+  S.cellIndex.clear();
+  for (let i = 0; i < S.elements.length; i++) indexElement(S.elements[i]);
 }
 
 // 一个元件此刻还要不要每帧照顾：动画没走完、或它属于要单独画在最上层的那几种（选中、删除中、亮着、有标签）
@@ -224,16 +224,16 @@ function rebuildActiveEls() {
   // 这一刻不再整张重建位图，而是把落下这一个元件直接补画进现有位图：补画只是一次贴图，
   // 整张重建在元件多时要几百毫秒，那一下就是「取消选中卡一下、还短暂空一帧」的来源
   // 补不上（相机或缩放已经对不上位图）时才退回整张作废，兜住所有情况
-  for (let i = 0; i < activeEls.length; i++) {
-    const el = activeEls[i];
+  for (let i = 0; i < S.activeEls.length; i++) {
+    const el = S.activeEls[i];
     if (elementNeedsFrame(el)) continue;   // 还要单独画的元件与这件事无关
-    if (elemCacheDirty) break;             // 位图本来就要整张重建，补画没有意义
+    if (S.elemCacheDirty) break;             // 位图本来就要整张重建，补画没有意义
     if (!patchBaseElementIntoCache(el)) { invalidateElementCache(); break; }
   }
-  activeEls.length = 0;
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
-    if (elementNeedsFrame(el)) activeEls.push(el);
+  S.activeEls.length = 0;
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
+    if (elementNeedsFrame(el)) S.activeEls.push(el);
   }
 }
 
@@ -275,13 +275,13 @@ function isBaseElement(el) {
 // 同时要求重绘一帧：主循环在场景静止时会整帧跳过渲染，只置脏标志的话位图要等到下一次有动静才重画，
 // 那段时间里元件既不在位图里、也不在叠加层上，看上去就是「消失一会儿又自己出现」
 function invalidateElementCache() {
-  elemCacheDirty = true;
-  sceneDirty = true;
+  S.elemCacheDirty = true;
+  S.sceneDirty = true;
 }
 
 // 开始一批：清空上一批留下的桶，桶里存着大路径，清掉让 GC 回收
 function paintBatchBegin() {
-  paintBatchMap.clear();
+  S.paintBatchMap.clear();
 }
 
 // 往当前这批里加一个元件：sx、sy 是屏幕位置（相对当前绘制原点），kScale 与 alpha 由调用方给定
@@ -290,7 +290,7 @@ function paintBatchAdd(el, sx, sy, angleDeg, kScale, alpha) {
   const deg = ((angleDeg % 360) + 360) % 360;
   const key = el.typeId + "|" + deg + "|" + el.fillCss + "|" + el.strokeCss + "|" +
     el.strokeW.toFixed(3) + "|" + kScale.toFixed(4) + "|" + alpha.toFixed(3);
-  let b = paintBatchMap.get(key);
+  let b = S.paintBatchMap.get(key);
   if (b === undefined) {
     // 新桶：a、b、c、d 四个矩阵系数由「朝向 + 缩放」定死，同桶内每个元件都一样，只差平移的 e、f
     const rad = deg * Math.PI / 180;
@@ -300,7 +300,7 @@ function paintBatchAdd(el, sx, sy, angleDeg, kScale, alpha) {
     // 描边宽度要跟着缩放一起放大：路径已被 matrix 变换成屏幕像素，若还按世界单位给线宽，
     // 放大到几十倍时描边只有零点几像素，看上去就像完全没有描边
     b = { path: new Path2D(), matrix: m, fill: el.fillCss, stroke: el.strokeCss, lineWidth: el.strokeW * kScale, alpha: alpha };
-    paintBatchMap.set(key, b);
+    S.paintBatchMap.set(key, b);
   }
   // 只改平移两项，再把这一类型的轮廓（按本桶朝向与缩放变换好）追加进桶路径
   b.matrix.e = sx;
@@ -315,7 +315,7 @@ function paintBatchAdd(el, sx, sy, angleDeg, kScale, alpha) {
 // 每种形状只描一次边、填一次色，四万多个元件只剩四万多次小图拷贝，且贴图按物理像素对齐，画面与原矢量画法逐像素一致
 function elementSprite(typeId, deg, fillCss, strokeCss, strokeW) {
   const key = typeId + "|" + deg + "|" + fillCss + "|" + strokeCss + "|" + strokeW.toFixed(3);
-  let sp = elemSpriteMap.get(key);
+  let sp = S.elemSpriteMap.get(key);
   if (sp !== undefined) return sp;
   const dpr = effectiveDpr();
   const scale = state.scale;
@@ -341,14 +341,14 @@ function elementSprite(typeId, deg, fillCss, strokeCss, strokeW) {
   g.stroke(path);   // 先描边后填充：描边内侧那半被填充盖住，只留外面一圈，与原画法完全一致
   g.fill(path);
   sp = { cv: cv, css: sideDev / dpr, halfDev: sideDev / 2 };
-  elemSpriteMap.set(key, sp);
+  S.elemSpriteMap.set(key, sp);
   return sp;
 }
 
 // 收尾当前这批：逐桶描边、填充。描边在前、填充在后，描边内侧那半被填充盖住，与原逐元件画法完全一致
 // 每一档的活跃元件（选中的、亮着的、正在动的）都走这条路：它们配色与透明度各不相同，按桶合并仍然划算
 function paintBatchFlush(c) {
-  for (const b of paintBatchMap.values()) {
+  for (const b of S.paintBatchMap.values()) {
     c.globalAlpha = b.alpha;
     c.fillStyle = b.fill;
     c.strokeStyle = b.stroke;
@@ -357,7 +357,7 @@ function paintBatchFlush(c) {
     c.fill(b.path);
   }
   c.globalAlpha = 1;   // 复位：调用方之后可能还要按默认透明度画别的东西
-  paintBatchMap.clear();
+  S.paintBatchMap.clear();
 }
 
 // 把冷淡元件整批画进缓存位图；位图比视口四周各大出 elemCachePadPx，平移没超出去就只贴图
@@ -367,50 +367,50 @@ function buildElementCache(vp) {
   const pad = CONFIG.elemCachePadPx;
   const w = Math.max(1, Math.ceil(vp.w + pad * 2));
   const h = Math.max(1, Math.ceil(vp.h + pad * 2));
-  if (elemCacheCanvas === null) {
-    elemCacheCanvas = document.createElement("canvas");
-    elemCacheCtx = elemCacheCanvas.getContext("2d");
+  if (S.elemCacheCanvas === null) {
+    S.elemCacheCanvas = document.createElement("canvas");
+    S.elemCacheCtx = S.elemCacheCanvas.getContext("2d");
   }
   // 改位图尺寸会顺带清空上下文，所以只在尺寸真的变了时才写
-  if (elemCacheCanvas.width !== Math.round(w * dpr) || elemCacheCanvas.height !== Math.round(h * dpr)) {
-    elemCacheCanvas.width = Math.round(w * dpr);
-    elemCacheCanvas.height = Math.round(h * dpr);
+  if (S.elemCacheCanvas.width !== Math.round(w * dpr) || S.elemCacheCanvas.height !== Math.round(h * dpr)) {
+    S.elemCacheCanvas.width = Math.round(w * dpr);
+    S.elemCacheCanvas.height = Math.round(h * dpr);
   }
-  const c = elemCacheCtx;
+  const c = S.elemCacheCtx;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);   // 位图内部也用 CSS 像素坐标，与主画布同一套
   c.clearRect(0, 0, w, h);
   c.lineJoin = "round";
-  elemCacheW = w;
-  elemCacheH = h;
-  elemCacheScale = state.scale;
+  S.elemCacheW = w;
+  S.elemCacheH = h;
+  S.elemCacheScale = state.scale;
   // 位图左上角对齐到物理像素：贴图时与屏幕一一对应，不触发逐像素重采样，既清晰又省掉插值开销
   // 原点挪半格以内不会让画面错位：元件在位图里按「相对原点」的坐标画，原点挪多少、贴图位置也挪多少，正好抵消
   const ox = Math.round((vp.x - pad) * dpr) / dpr;   // 位图左上角此刻的屏幕位置（对齐到物理像素）
   const oy = Math.round((vp.y - pad) * dpr) / dpr;
-  elemCacheOX = ox;
-  elemCacheOY = oy;
-  elemCacheAnchorSX = state.anchorSX;   // 记下这一刻的相机，之后贴图就按它与当前相机算仿射变换
-  elemCacheAnchorSY = state.anchorSY;
-  elemCacheAnchorWX = state.anchorWX;
-  elemCacheAnchorWY = state.anchorWY;
-  elemCacheWX = screenToWorldX(ox);
-  elemCacheWY = screenToWorldY(oy);
+  S.elemCacheOX = ox;
+  S.elemCacheOY = oy;
+  S.elemCacheAnchorSX = state.anchorSX;   // 记下这一刻的相机，之后贴图就按它与当前相机算仿射变换
+  S.elemCacheAnchorSY = state.anchorSY;
+  S.elemCacheAnchorWX = state.anchorWX;
+  S.elemCacheAnchorWY = state.anchorWY;
+  S.elemCacheWX = screenToWorldX(ox);
+  S.elemCacheWY = screenToWorldY(oy);
   const reach = CONFIG.elementLen * state.scale;   // 粗剔除余量：元件离格心最远不会超过一个格长
   let drawnN = 0;
   let culledN = 0;
   // 候选怎么取：按可见格去索引里捞，开销只跟「视野覆盖多少格」走，与元件总数无关；
   // 视野缩得很小、覆盖的格数反而超过元件总数时（整张图挤在屏上），直接扫元件表更省。两条路取便宜的那条
   const reachW = reach / state.scale;   // 换算成世界单位的余量，用来把可见范围向外扩一圈格
-  const cand = elemCacheCand;
+  const cand = S.elemCacheCand;
   cand.length = 0;
-  const gx0 = Math.floor(elemCacheWX - reachW);
+  const gx0 = Math.floor(S.elemCacheWX - reachW);
   const gx1 = Math.floor(screenToWorldX(ox + w) + reachW);
   const gy0 = Math.floor(screenToWorldY(oy + h) - reachW);   // 屏幕 Y 向下、世界 Y 向上，位图底边对应的世界 Y 更小
-  const gy1 = Math.floor(elemCacheWY + reachW);
-  if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) <= elements.length) {
+  const gy1 = Math.floor(S.elemCacheWY + reachW);
+  if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) <= S.elements.length) {
     for (let gx = gx0; gx <= gx1; gx++) {
       for (let gy = gy0; gy <= gy1; gy++) {
-        const arr = cellIndex.get(cellKeyOf(gx, gy));
+        const arr = S.cellIndex.get(cellKeyOf(gx, gy));
         if (arr === undefined) continue;
         for (let a = 0; a < arr.length; a++) {
           if (isBaseElement(arr[a])) cand.push(arr[a]);
@@ -418,11 +418,11 @@ function buildElementCache(vp) {
       }
     }
   } else {
-    for (let i = 0; i < elements.length; i++) {
-      if (isBaseElement(elements[i])) cand.push(elements[i]);
+    for (let i = 0; i < S.elements.length; i++) {
+      if (isBaseElement(S.elements[i])) cand.push(S.elements[i]);
     }
   }
-  elemSpriteMap.clear();   // 贴图是按当前缩放画出来的，缩放一变就全部作废，这里连同旧缩放的一起清掉
+  S.elemSpriteMap.clear();   // 贴图是按当前缩放画出来的，缩放一变就全部作废，这里连同旧缩放的一起清掉
   for (let i = 0; i < cand.length; i++) {
     const el = cand[i];
     const sx = worldToScreenX(el.wx) - ox;
@@ -435,9 +435,9 @@ function buildElementCache(vp) {
     // 贴图位置按物理像素取整：贴图与屏幕一一对应，既不触发重采样，也不额外花时间；位移误差不超过半个物理像素
     c.drawImage(sp.cv, (Math.round(sx * dpr) - sp.halfDev) / dpr, (Math.round(sy * dpr) - sp.halfDev) / dpr, sp.css, sp.css);
   }
-  elemCacheDrawn = drawnN;
-  elemCacheCulled = culledN;
-  elemCacheDirty = false;
+  S.elemCacheDrawn = drawnN;
+  S.elemCacheCulled = culledN;
+  S.elemCacheDirty = false;
   // 探针读数：这一帧重画了缓存位图，以及候选、真正画进位图、被剔除的各是多少
   pval("缓存重画", 1);
   pval("候选", cand.length);
@@ -449,18 +449,18 @@ function buildElementCache(vp) {
 // 前提是位图与当前相机、缩放完全对得上，否则坐标映射会错位，此时返回 false，让调用方整张作废重画
 // 补画本身只是一次贴图，与元件总量无关，所以取消选中、灯熄灭这类收尾不会再卡一下
 function patchBaseElementIntoCache(el) {
-  if (elemCacheCanvas === null || elemCacheDirty) return false;      // 没有位图、或位图正等着重建，都不必补
-  if (elemCacheScale !== state.scale) return false;                  // 缩放变了：贴图尺寸与位图基准都对不上
-  if (state.anchorSX !== elemCacheAnchorSX || state.anchorSY !== elemCacheAnchorSY) return false;  // 相机在动
-  if (state.anchorWX !== elemCacheAnchorWX || state.anchorWY !== elemCacheAnchorWY) return false;
+  if (S.elemCacheCanvas === null || S.elemCacheDirty) return false;      // 没有位图、或位图正等着重建，都不必补
+  if (S.elemCacheScale !== state.scale) return false;                  // 缩放变了：贴图尺寸与位图基准都对不上
+  if (state.anchorSX !== S.elemCacheAnchorSX || state.anchorSY !== S.elemCacheAnchorSY) return false;  // 相机在动
+  if (state.anchorWX !== S.elemCacheAnchorWX || state.anchorWY !== S.elemCacheAnchorWY) return false;
   const dpr = effectiveDpr();
-  const sx = worldToScreenX(el.wx) - elemCacheOX;   // 相对位图左上角的位置（CSS px）
-  const sy = worldToScreenY(el.wy) - elemCacheOY;
+  const sx = worldToScreenX(el.wx) - S.elemCacheOX;   // 相对位图左上角的位置（CSS px）
+  const sy = worldToScreenY(el.wy) - S.elemCacheOY;
   const reach = CONFIG.elementLen * state.scale;    // 位图外一圈的余量：落在余量里补画是安全的
-  if (sx < -reach || sx > elemCacheW + reach || sy < -reach || sy > elemCacheH + reach) return false;
+  if (sx < -reach || sx > S.elemCacheW + reach || sy < -reach || sy > S.elemCacheH + reach) return false;
   refreshElementColors(el);                         // 常态配色：此刻它的选中、亮起缓动都已归零
   const sp = elementSprite(el.typeId, ((el.angle % 360) + 360) % 360, el.fillCss, el.strokeCss, el.strokeW);
-  const c = elemCacheCtx;
+  const c = S.elemCacheCtx;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);             // 位图内部一律按 CSS 像素作画，与整张重建时同一套
   // 贴图位置与整张重建时同样按物理像素取整，补进去的那一个与重画出来的逐像素一致
   c.drawImage(sp.cv, (Math.round(sx * dpr) - sp.halfDev) / dpr, (Math.round(sy * dpr) - sp.halfDev) / dpr, sp.css, sp.css);
@@ -468,7 +468,7 @@ function patchBaseElementIntoCache(el) {
 }
 
 function renderElements() {
-  if (renderSkip.elements) return;   // 逐层开关：排查帧率时整层跳过，画面上只留网格、激光与光晕
+  if (S.renderSkip.elements) return;   // 逐层开关：排查帧率时整层跳过，画面上只留网格、激光与光晕
   const vp = getViewport();
   // 剔除余量：形状的原点就在格心，离格心最远的一点是三角形底角或反相器顶点上那颗气泡
   // 统一按「元件长度的一半再乘 √2」估：任何形状都落在这个半径之内，比逐个类型算更省事也更保险
@@ -479,47 +479,47 @@ function renderElements() {
   const cullT = vp.y - cullMargin;
   const cullB = vp.y + vp.h + cullMargin;
   // 计数从缓存那一次重建的结果起算，叠加层再往上加，读数仍然是「这一帧画面上有多少元件」
-  let drawn = elemCacheDrawn;
-  let culled = elemCacheCulled;
+  let drawn = S.elemCacheDrawn;
+  let culled = S.elemCacheCulled;
 
-  ctx.save();
+  S.ctx.save();
   // 裁剪到视口：元件和网格一样只出现在视口内，不会压到上方面板或底部栏上
-  ctx.beginPath();
-  ctx.rect(vp.x, vp.y, vp.w, vp.h);
-  ctx.clip();
-  ctx.lineJoin = "round";  // 圆角靠描边的圆角连接实现：拐角外侧按描边宽度的一半倒圆，不用改路径数据
+  S.ctx.beginPath();
+  S.ctx.rect(vp.x, vp.y, vp.w, vp.h);
+  S.ctx.clip();
+  S.ctx.lineJoin = "round";  // 圆角靠描边的圆角连接实现：拐角外侧按描边宽度的一半倒圆，不用改路径数据
 
   // 相机停稳：参考点与缩放都到了目标值，这时画面不会再动，正是重画一张清晰位图的好时机
   const camSettled = state.anchorSX === state.tAnchorSX && state.anchorSY === state.tAnchorSY && state.logScale === state.tLogScale;
   // 贴图变换：把位图按「建图那一刻的相机 → 现在的相机」摆过去，缩放与平移都由这一次仿射变换承担
   // 为什么不要求缩放完全相等：缩放途中每帧重画四万多个元件要两三百毫秒，画面只能到两三帧；
   // 拿旧位图按新缩放贴过去，元件的位置与相对大小完全正确，只是采样略糊，换来缩放全程跟手
-  let ck = elemCacheScale > 0 ? state.scale / elemCacheScale : 1;   // 位图要乘上的缩放倍数
-  let cx = state.anchorSX + (elemCacheAnchorWX - state.anchorWX) * state.scale + (elemCacheOX - elemCacheAnchorSX) * ck;
-  let cy = state.anchorSY - (elemCacheAnchorWY - state.anchorWY) * state.scale - (elemCacheAnchorSY - elemCacheOY) * ck;
+  let ck = S.elemCacheScale > 0 ? state.scale / S.elemCacheScale : 1;   // 位图要乘上的缩放倍数
+  let cx = state.anchorSX + (S.elemCacheAnchorWX - state.anchorWX) * state.scale + (S.elemCacheOX - S.elemCacheAnchorSX) * ck;
+  let cy = state.anchorSY - (S.elemCacheAnchorWY - state.anchorWY) * state.scale - (S.elemCacheAnchorSY - S.elemCacheOY) * ck;
   // 位图被放大到超过阈值就当场重画，不再等相机停稳：缩小再放大时位图被拉得越大越糊，
   // 而等收敛要零点几秒，那一段就是用户看到的最糊的时候；阈值由设置里的「缩放刷新速度」给出
   // 只判放大方向：缩小时是拿高分辨率位图缩小采样，不会糊，重画反而白花时间
-  const overDrift = ck > zoomRefreshLimit;
+  const overDrift = ck > S.zoomRefreshLimit;
   // 贴出来的位图要盖住整个视口；盖不住就说明视野已经跑到旧位图外面，再贴就会缺内容
-  const covered = elemCacheCanvas !== null &&
+  const covered = S.elemCacheCanvas !== null &&
     cx <= vp.x + 0.5 && cy <= vp.y + 0.5 &&
-    cx + elemCacheW * ck >= vp.x + vp.w - 0.5 && cy + elemCacheH * ck >= vp.y + vp.h - 0.5;
+    cx + S.elemCacheW * ck >= vp.x + vp.w - 0.5 && cy + S.elemCacheH * ck >= vp.y + vp.h - 0.5;
   pval("缓存重画", 0);   // 先按「这一帧只贴图、不重画」记一次，下面真重画时会被覆盖成 1
   // 五种情形才重画整张位图：结构变了、还没建过、贴出来盖不住视口、相机停稳且缩放已经对不上、放大超过一档
   // 「每帧都在变缩放」仍被排除在外，于是大多数帧只剩一次贴图
-  if (elemCacheDirty || elemCacheCanvas === null || !covered || overDrift ||
-      (camSettled && elemCacheScale !== state.scale)) {
+  if (S.elemCacheDirty || S.elemCacheCanvas === null || !covered || overDrift ||
+      (camSettled && S.elemCacheScale !== state.scale)) {
     buildElementCache(vp);
     // 位图刚换过：相机、缩放、原点都成了当前值，贴图变换必须按新值重算，否则会用旧变换贴新图
-    ck = elemCacheScale > 0 ? state.scale / elemCacheScale : 1;
-    cx = state.anchorSX + (elemCacheAnchorWX - state.anchorWX) * state.scale + (elemCacheOX - elemCacheAnchorSX) * ck;
-    cy = state.anchorSY - (elemCacheAnchorWY - state.anchorWY) * state.scale - (elemCacheAnchorSY - elemCacheOY) * ck;
+    ck = S.elemCacheScale > 0 ? state.scale / S.elemCacheScale : 1;
+    cx = state.anchorSX + (S.elemCacheAnchorWX - state.anchorWX) * state.scale + (S.elemCacheOX - S.elemCacheAnchorSX) * ck;
+    cy = state.anchorSY - (S.elemCacheAnchorWY - state.anchorWY) * state.scale - (S.elemCacheAnchorSY - S.elemCacheOY) * ck;
   }
   // 只贴视口真正覆盖到的那一块：位图四周各留了一圈 elemCachePadPx 的余量，整张贴会把外圈一并栅格化，
   // 缩放放大时外圈还跟着一起放大，实测这一下就占掉元件层大半时间。按源矩形裁到视口后，
   // 无论缩放多少倍，每帧栅格化的像素都封顶在视口大小，与位图尺寸无关
-  const bw = elemCacheW * ck, bh = elemCacheH * ck;   // 位图贴到屏幕上占的宽高（CSS px）
+  const bw = S.elemCacheW * ck, bh = S.elemCacheH * ck;   // 位图贴到屏幕上占的宽高（CSS px）
   const ix0 = cx > vp.x ? cx : vp.x;                  // 位图与视口的相交矩形（屏幕坐标）
   const iy0 = cy > vp.y ? cy : vp.y;
   const ix1 = cx + bw < vp.x + vp.w ? cx + bw : vp.x + vp.w;
@@ -530,12 +530,12 @@ function renderElements() {
     // 相交边界与位图自身范围都换算成物理像素再取整，并夹进位图像素内，避免源矩形越界取到脏边
     const x0 = Math.max(Math.round(ix0 * dpr), Math.ceil(bxD));
     const y0 = Math.max(Math.round(iy0 * dpr), Math.ceil(byD));
-    const x1 = Math.min(Math.round(ix1 * dpr), Math.floor(bxD + elemCacheW * dpr * ck));
-    const y1 = Math.min(Math.round(iy1 * dpr), Math.floor(byD + elemCacheH * dpr * ck));
+    const x1 = Math.min(Math.round(ix1 * dpr), Math.floor(bxD + S.elemCacheW * dpr * ck));
+    const y1 = Math.min(Math.round(iy1 * dpr), Math.floor(byD + S.elemCacheH * dpr * ck));
     if (x1 > x0 && y1 > y0) {
       // 缩放为 1 且位图已对齐物理像素时，源矩形与目标矩形逐像素对齐，退化成纯拷贝，不触发重采样
       const inv = 1 / ck;   // 屏幕像素 → 位图内部像素：位图放大贴时源矩形相应变小
-      ctx.drawImage(elemCacheCanvas,
+      S.ctx.drawImage(S.elemCacheCanvas,
         (x0 - bxD) * inv, (y0 - byD) * inv, (x1 - x0) * inv, (y1 - y0) * inv,
         x0 / dpr, y0 / dpr, (x1 - x0) / dpr, (y1 - y0) / dpr);
     }
@@ -548,24 +548,24 @@ function renderElements() {
     // 每一档单独成一批：档与档之间的压盖顺序必须保住；档内元件互不重叠，所以可以合并成一条路径
     paintBatchBegin();
     // 只走活跃表：冷淡元件已经在缓存位图里，不必每帧再扫一遍全表去把它们认出来
-    for (let i = 0; i < activeEls.length; i++) {
-      const el = activeEls[i];
+    for (let i = 0; i < S.activeEls.length; i++) {
+      const el = S.activeEls[i];
       if (isBaseElement(el)) continue;   // 冷淡元件已经在缓存位图里，不重复画
       if ((el.deleting ? 0 : (el.selected ? 2 : 1)) !== rank) continue;  // 不属于这一档，跳过
       // 删除动画的缓动值同时驱动缩放和透明度；没在删除时恒为 0，等于原样绘制
       const e = el.deleting ? easeOutCubic(el.deleteP) : 0;
       // 公转中的元件画的是弧线上的插值位置：数据要等落位才改，所以此刻画面和数据是有意分开的
       let wx = el.wx, wy = el.wy, angle = el.angle;
-      if (orbitActive && el.orbitU0 !== null) {
-        const t = easeOutCubic(orbitP);
-        const total = orbitTurns * 90;
+      if (S.orbitActive && el.orbitU0 !== null) {
+        const t = easeOutCubic(S.orbitP);
+        const total = S.orbitTurns * 90;
         const rad = total * t * Math.PI / 180;
         const c = Math.cos(rad), s = Math.sin(rad);
-        const du = el.orbitU0 - orbitPivotU;
-        const dv = el.orbitV0 - orbitPivotV;
+        const du = el.orbitU0 - S.orbitPivotU;
+        const dv = el.orbitV0 - S.orbitPivotV;
         // 吸附量随进度线性补上：走到头时画面位置正好等于落位后的格心，不会在收尾时跳半格
-        wx = orbitPivotU + du * c + dv * s + el.orbitShiftU * t + 0.5;
-        wy = orbitPivotV - du * s + dv * c + el.orbitShiftV * t + 0.5;
+        wx = S.orbitPivotU + du * c + dv * s + el.orbitShiftU * t + 0.5;
+        wy = S.orbitPivotV - du * s + dv * c + el.orbitShiftV * t + 0.5;
         angle = el.orbitAngle0 + total * t;
       }
       // 拖动缓动的视觉偏移叠在数据位置之上：数据已经跳到目标格，画面还差一点点，缓出追上后偏移归零
@@ -585,20 +585,20 @@ function renderElements() {
       refreshElementColors(el);
       paintBatchAdd(el, sx, sy, angle, state.scale * (1 - e), 1 - e);
     }
-    paintBatchFlush(ctx);   // 这一档收尾：每桶一次描边、一次填充
+    paintBatchFlush(S.ctx);   // 这一档收尾：每桶一次描边、一次填充
   }
-  ctx.restore();
+  S.ctx.restore();
   // 本帧两个计数写回全局：调试面板的读数直接读它们，不必再数一遍
   // 整帧被跳过时这两个值保持上一次渲染的结果，读数因此读的是「最近一次真实渲染的规模」
-  drawnElementCount = drawn;
-  culledElementCount = culled;
-  pval("叠加层", drawn - elemCacheDrawn);   // 探针读数：这一帧单独画的「热」元件有几个
+  S.drawnElementCount = drawn;
+  S.culledElementCount = culled;
+  pval("叠加层", drawn - S.elemCacheDrawn);   // 探针读数：这一帧单独画的「热」元件有几个
 }
 
 // 找出指针当前所指格子里的元件：视口外或格内没有元件都返回 null
 function findElementAtPointer() {
-  if (!isInViewport(pointerSX, pointerSY)) return null;
-  return findElementAt(cellCenterX(screenToWorldX(pointerSX)), cellCenterY(screenToWorldY(pointerSY)));
+  if (!isInViewport(S.pointerSX, S.pointerSY)) return null;
+  return findElementAt(cellCenterX(screenToWorldX(S.pointerSX)), cellCenterY(screenToWorldY(S.pointerSY)));
 }
 
 // 切换指针所在格光源的开关：只在指针下是存活的光源时生效，空格、其他类型、删除动画中的都忽略
@@ -623,7 +623,7 @@ function deleteElementAtScreen(screenX, screenY) {
   if (el === null || el.deleting) return;
   el.deleting = true;
   el.deleteP = 0;
-  rayGraph.dirty = true;  // 删除动画一开始就把它从模拟里摘掉，不等动画放完
+  S.rayGraph.dirty = true;  // 删除动画一开始就把它从模拟里摘掉，不等动画放完
   // 摘掉之后立刻重算一次激光场：它已经不算电路里的人了，光就不该再照着它走
   // 不补这一下的话，要等微帧时钟走到下一格才会更新，看着就是「已经删了，光还挂在上面」
   refreshLightField();
@@ -637,8 +637,8 @@ function deleteElementAtScreen(screenX, screenY) {
 function deleteSelection() {
   let any = false;
   // 只走活跃表：选中的元件必定在活跃表里，十万个元件里只挑出手上这一批，不必扫全表
-  for (let i = 0; i < activeEls.length; i++) {
-    const el = activeEls[i];
+  for (let i = 0; i < S.activeEls.length; i++) {
+    const el = S.activeEls[i];
     if (!el.selected || el.deleting) continue;
     el.deleting = true;
     el.deleteP = 0;
@@ -657,14 +657,14 @@ function deleteSelection() {
 // 每帧推进所有删除中的元件动画；动画走完只挂一个标记，等这一帧末尾统一压实一次
 // 只走活跃表：正在删除的元件必定在活跃表里，不必为它们扫一遍全表
 function updateDeletions(dt) {
-  for (let i = 0; i < activeEls.length; i++) {
-    const el = activeEls[i];
+  for (let i = 0; i < S.activeEls.length; i++) {
+    const el = S.activeEls[i];
     if (!el.deleting) continue;
     el.deleteP = Math.min(1, el.deleteP + dt / CONFIG.elementDeleteDuration);
     if (el.deleteP >= 1) {
       // 动画期间这一格仍算被占用，虚影不会提前淡入；走到这里才挂标记，压实之后才真正腾出格子
       el.gone = true;
-      pendingCompact = true;
+      S.pendingCompact = true;
     }
   }
 }
@@ -675,16 +675,16 @@ function updateDeletions(dt) {
 // 自查通过：只按 gone 标记筛，删除动画还没走完的元件不动；摘掉的元件同时从格子索引里退掉，
 // 下标全变之后阻挡图与结算缓冲一并作废重建，不会留下按下标串位的残留
 function compactElements() {
-  pendingCompact = false;
+  S.pendingCompact = false;
   let w = 0;
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     if (el.gone) { unindexElement(el); continue; }   // 从格子索引里退掉：这一格到这一刻才真正腾出来
-    if (w !== i) { elements[w] = el; el.idx = w; }   // 下标前移了才需要改；没动过的下标本来就是对的
+    if (w !== i) { S.elements[w] = el; el.idx = w; }   // 下标前移了才需要改；没动过的下标本来就是对的
     w++;
   }
-  elements.length = w;
-  rayGraph.dirty = true;    // 下标全变，阻挡图必须按新下标重建
+  S.elements.length = w;
+  S.rayGraph.dirty = true;    // 下标全变，阻挡图必须按新下标重建
   resetSimBuffers();        // 发射表与接收表按下标存，一起作废
   invalidateElementCache(); // 结构变了，缓存位图整张作废
 }

@@ -37,8 +37,8 @@ const SCENE_READABLE_VERSIONS = [1, 2, 3];  // Array<number>：本程序还能�
 // 只导出电路、文字与视野三类；界面设置与配色属于工作环境偏好，不进存档
 function serializeScene() {
   const list = [];
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     if (el.deleting) continue;  // 正在播放消失动画的元件不算数，存下来会凭空多出一个
     const rec = elementToRecord(el);
     // 发射掩码必须一起存：它是推演状态，不是布局的函数
@@ -53,9 +53,9 @@ function serializeScene() {
   }
   const textList = [];
   // 内容还是空的就跳过：原地输入时那块文字会短暂地存在但没有内容，写进存档会凭空多出一条空记录
-  for (let i = 0; i < texts.length; i++) {
-    if (texts[i].text.trim() === "") continue;
-    textList.push(textToRecord(texts[i]));
+  for (let i = 0; i < S.texts.length; i++) {
+    if (S.texts[i].text.trim() === "") continue;
+    textList.push(textToRecord(S.texts[i]));
   }
   return {
     format: SCENE_FORMAT,
@@ -170,15 +170,15 @@ function parseScene(raw) {
 function clearScene() {
   // 正在原地编辑的浮动文本先收掉：它马上就要被下面那行清空，不收的话输入框会留在屏幕上指向一块已消失的文字
   // 按「放弃」收：这一刻本来就是要把画面整个换掉，没必要把一次半截的输入当成改动记进历史
-  if (textEditing) endTextEditing(false);
-  elements.length = 0;    // 元件直接画在画布上，清掉数据就等于清掉画面，没有节点要拆
-  texts.length = 0;       // 浮动文本同样直接画在画布上，一起清掉；它与元件是两类东西，各清各的
+  if (S.textEditing) endTextEditing(false);
+  S.elements.length = 0;    // 元件直接画在画布上，清掉数据就等于清掉画面，没有节点要拆
+  S.texts.length = 0;       // 浮动文本同样直接画在画布上，一起清掉；它与元件是两类东西，各清各的
   rebuildCellIndex();     // 格子索引整张清空：元件都没了，索引里不能留下指向旧元件的条目
   resetSimBuffers();      // 发射表与接收表按元件下标存，元件没了必须跟着清零，否则下标会串到新元件上
-  laserSegments = [];     // 上一帧的激光场一并清掉，不然读档那一瞬间会闪出一片属于旧电路的激光
-  microframe = 0;         // 微帧计数归零，新电路从第 0 帧重新开始
-  microAcc = 0;           // 累加余数清零，免得带着旧电路攒下的零头多算一个微帧
-  rayGraph.dirty = true;  // 阻挡图整体作废：放在最后做，避免在元件数组半替换的中途被触发重建
+  S.laserSegments = [];     // 上一帧的激光场一并清掉，不然读档那一瞬间会闪出一片属于旧电路的激光
+  S.microframe = 0;         // 微帧计数归零，新电路从第 0 帧重新开始
+  S.microAcc = 0;           // 累加余数清零，免得带着旧电路攒下的零头多算一个微帧
+  S.rayGraph.dirty = true;  // 阻挡图整体作废：放在最后做，避免在元件数组半替换的中途被触发重建
 }
 
 // 把校验过的存档应用到画面：先清空旧电路，再按存档重建元件，最后把视野设过去
@@ -216,13 +216,13 @@ function applyScene(parsed) {
     state.tLogScale = state.logScale;
   }
   resetHistory();  // 换文档不是编辑动作：上一条电路的历史留着只会撤出莫名其妙的画面，直接清空
-  docDirty = false;  // 画面刚被这份存档铺出来，这一刻它与磁盘上那份完全一致，未保存的标记要灭掉
+  S.docDirty = false;  // 画面刚被这份存档铺出来，这一刻它与磁盘上那份完全一致，未保存的标记要灭掉
   // 把电路一次推到稳定态再交出去，第一帧看到的就是定下来的光，而不是一层层爬进来的过程
   // 引擎每微帧只往下推一层，按默认速度一层要等 0.12 秒，读一份深一点的电路就能眼看着光从光源一格格爬过去，
   // 中途反相器还要翻几下，像是激光乱了套；这里走的是与「极速」同一条路：逻辑语义完全一样，只是不再等真实时间
   // 各元件的发射掩码在上面已经按存档写回，所以这一步不是在「点火」，只是把接收掩码与激光场补齐
   // 若反过来让它从全灭的状态自己推：反相器会按「没有输入就发射」先吐光，那道光进了闭合的环就再也出不来
   runToQuiescence();
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 

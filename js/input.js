@@ -26,26 +26,26 @@ function zoomAt(screenX, screenY, factor) {
 // 这一下按键是不是带着 Cmd（Mac）/ Ctrl 按下的
 // 事件里的 metaKey / ctrlKey 在有些时刻不可信（见 state.js 里 metaHeld 那段说明），所以与自己记的按下状态认一个即可
 function cmdKeyHeld(e) {
-  return e.metaKey || e.ctrlKey || metaHeld || ctrlHeld;
+  return e.metaKey || e.ctrlKey || S.metaHeld || S.ctrlHeld;
 }
 
 // 绑定全部输入事件；init 只执行一次，所以监听器不会被重复注册
 function setupInput() {
   // 滚轮缩放：deltaMode 为 1 时单位是「行」，换算成像素再做指数缩放
-  canvas.addEventListener("wheel", function (e) {
+  S.canvas.addEventListener("wheel", function (e) {
     e.preventDefault();
     const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
     zoomAt(e.clientX, e.clientY, Math.exp(-delta * CONFIG.wheelZoomRate));
   }, { passive: false });
 
   // 中键按下：阻止浏览器自动滚动，并开始拖拽视野
-  canvas.addEventListener("mousedown", function (e) {
+  S.canvas.addEventListener("mousedown", function (e) {
     if (e.button === 1) e.preventDefault();
   });
 
   // 右键：屏蔽浏览器右键菜单，右键在画布上的语义改成「删除指针所在的东西」
   // 先问浮动文本：它画在元件之上，按「看到谁在最上面就删谁」的直觉，它在元件之前接手
-  canvas.addEventListener("contextmenu", function (e) {
+  S.canvas.addEventListener("contextmenu", function (e) {
     e.preventDefault();
     if (deleteTextAtScreen(e.clientX, e.clientY)) return;
     deleteElementAtScreen(e.clientX, e.clientY);
@@ -55,10 +55,10 @@ function setupInput() {
   // 浮动文本不属于电路，不受「只有选中工具才操作画布上的东西」那条限制，所以它排在工具判断之前
   // 元件标签那一路：第一次点击本身已经把元件选中了（选中工具下点击就是选中），
   // 所以「先选中再快速点一下」自然就凑成一次双击；点在标签上就改那块标签，两处归到同一个输入框
-  canvas.addEventListener("dblclick", function (e) {
-    if (labelEditorOpen || textEditing) return;  // 正在输入中：这次双击的第一次点击已经把输入收掉了，不必再开一次
-    pointerSX = e.clientX;
-    pointerSY = e.clientY;
+  S.canvas.addEventListener("dblclick", function (e) {
+    if (S.labelEditorOpen || S.textEditing) return;  // 正在输入中：这次双击的第一次点击已经把输入收掉了，不必再开一次
+    S.pointerSX = e.clientX;
+    S.pointerSY = e.clientY;
     const tx = textAtPointer(e.clientX, e.clientY);
     if (tx !== null) {
       beginTextEditing(tx, false);  // 浮动文本就地改，不弹窗：字就在眼前，改的时候要看得见上下文
@@ -68,17 +68,17 @@ function setupInput() {
     beginLabelEditingAtPointer();
   });
 
-  canvas.addEventListener("pointerdown", function (e) {
+  S.canvas.addEventListener("pointerdown", function (e) {
     // 点击也算一次「进入画布」：页面加载时鼠标已在画布内的话不会触发 pointerenter，这里补上
-    pointerSX = e.clientX;
-    pointerSY = e.clientY;
-    pointerInside = true;
-    sceneDirty = true;  // 点击可能选槽、开关光源或放置元件，画面必须更新一次
+    S.pointerSX = e.clientX;
+    S.pointerSY = e.clientY;
+    S.pointerInside = true;
+    S.sceneDirty = true;  // 点击可能选槽、开关光源或放置元件，画面必须更新一次
     // 记住这一下点进来之前是不是正在原地编辑文字，因为下面那句 canvas.focus() 会立刻把输入框的焦点抢走，
     // 输入框随即失焦并把这一次输入收下；等到再往下判时 textEditing 已经是假的了
     // 不在这里先记一笔的话，这一下就不会被吃掉，会接着去放置元件或拉框，变成「点一下收尾顺带又干了别的」
-    const wasTextEditing = textEditing;
-    canvas.focus();
+    const wasTextEditing = S.textEditing;
+    S.canvas.focus();
     // 左键：先判是不是点在选项槽上（是则选中该槽并进入按下态、不放置），否则在指针所在格心放置元件
     if (e.button === 0) {
       const hit = slotIndexAt(e.clientX, e.clientY);
@@ -87,8 +87,8 @@ function setupInput() {
         // 输入还开着就先把它收下（失焦那一步多半已经收过了，重复调用没事），然后照常选槽，这一下不被吃掉
         // 若把这一下也吞掉，用户要连点两下才切得动工具，会以为槽坏了
         if (wasTextEditing) endTextEditing(true);
-        if (labelEditorOpen) closeLabelEditor(true);
-        slotPressedIndex = hit;  // 按下态：只缩得更深，不改亮度，避免按下时闪一下
+        if (S.labelEditorOpen) closeLabelEditor(true);
+        S.slotPressedIndex = hit;  // 按下态：只缩得更深，不改亮度，避免按下时闪一下
         // 两个按钮只是「长得像槽」，它们不是可选项：不能改选中项，否则虚影会去查一个不存在的元件
         // 选中槽与元件槽都能选中；从选中工具切到别的工具时，选区会被立刻收掉（元件就地落位）
         if (isPickableSlot(hit)) setSelectedSlot(hit);
@@ -102,7 +102,7 @@ function setupInput() {
         return;  // 这一下已经被输入框吃掉，不再往下走
       }
       // 标签输入框还开着时同理：画布上的左键一律先当作「收起并把字存下」
-      if (labelEditorOpen) {
+      if (S.labelEditorOpen) {
         closeLabelEditor(true);
         return;  // 这一下已经被输入框吃掉，不再往下走
       }
@@ -166,16 +166,16 @@ function setupInput() {
     state.panLastX = e.clientX;
     state.panLastY = e.clientY;
     // 捕获指针：指针移出画布甚至移出窗口也能继续收到 move 事件
-    canvas.setPointerCapture(e.pointerId);
+    S.canvas.setPointerCapture(e.pointerId);
   });
 
   // 拖拽中：自己用前后 clientX/clientY 求位移，不用 movementX —— 后者在部分浏览器里会跳变，拖起来一抖一抖
-  canvas.addEventListener("pointermove", function (e) {
+  S.canvas.addEventListener("pointermove", function (e) {
     // 无论是否在拖拽都记录指针位置：虚影每帧据此重算目标格心，平移缩放时也能跟着更新
-    pointerSX = e.clientX;
-    pointerSY = e.clientY;
-    pointerInside = true;
-    sceneDirty = true;  // 指针位置变了，虚影与槽悬停都可能跟着变，强制重绘一次
+    S.pointerSX = e.clientX;
+    S.pointerSY = e.clientY;
+    S.pointerInside = true;
+    S.sceneDirty = true;  // 指针位置变了，虚影与槽悬停都可能跟着变，强制重绘一次
     // 同步选项槽的悬停状态：命中判定与绘制共用 panelSlotRect，两边不会算歪
     updateSlotHoverAt(e.clientX, e.clientY);
     moveMarquee(e);  // 拉框与拖视野是两个互斥的指针操作，各认各的指针 id，互不干扰
@@ -193,68 +193,68 @@ function setupInput() {
   });
 
   // 指针进入画布：立刻记录位置并抢下键盘焦点，否则页面/iframe 未获得焦点时按 WASD 收不到 keydown
-  canvas.addEventListener("pointerenter", function (e) {
-    pointerSX = e.clientX;
-    pointerSY = e.clientY;
-    pointerInside = true;
+  S.canvas.addEventListener("pointerenter", function (e) {
+    S.pointerSX = e.clientX;
+    S.pointerSY = e.clientY;
+    S.pointerInside = true;
     // 正在原地编辑浮动文本、或改标签的弹窗开着时不抢焦点：两者都会盖在画布上，
     // 鼠标从框里移出来落到画布上也会走到这里，这一抢会把焦点从输入框夺走，接着就打不进字了
     // 编辑期间本来也不需要画布的键盘：这一刻用户要敲的是字，不是 WASD
-    if (!textEditing && !labelEditorOpen) canvas.focus();
-    sceneDirty = true;  // 指针可能正好从槽上进入画布，槽的悬停状态与虚影都要立刻反映出来
+    if (!S.textEditing && !S.labelEditorOpen) S.canvas.focus();
+    S.sceneDirty = true;  // 指针可能正好从槽上进入画布，槽的悬停状态与虚影都要立刻反映出来
     // 这里也判一次槽的悬停，避免要等第一次移动才生效
     updateSlotHoverAt(e.clientX, e.clientY);
   });
 
   // 指针离开画布：标记为不在画布内，虚影随之隐藏
-  canvas.addEventListener("pointerleave", function () {
-    pointerInside = false;
-    sceneDirty = true;  // 虚影要消失、槽要复位，这些变化必须重绘一次才看得到
+  S.canvas.addEventListener("pointerleave", function () {
+    S.pointerInside = false;
+    S.sceneDirty = true;  // 虚影要消失、槽要复位，这些变化必须重绘一次才看得到
     // 离开画布也要清掉槽的悬停与按下，否则槽会一直停在缩小状态回不去
-    slotHoverIndex = -1;
-    slotPressedIndex = -1;
-    slotHoverTime = 0;  // 停留计时一并归零，重新进入时要重新数 1.4 秒
+    S.slotHoverIndex = -1;
+    S.slotPressedIndex = -1;
+    S.slotHoverTime = 0;  // 停留计时一并归零，重新进入时要重新数 1.4 秒
   });
 
   // 结束拖拽：释放捕获并清空拖拽状态
-  canvas.addEventListener("pointerup", function (e) {
+  S.canvas.addEventListener("pointerup", function (e) {
     // 设置按钮：松开时指针仍停在按钮上才算一次有效点击（按下后拖走再松手不算）
     // 只切换设置自己的开合状态，不去开合调试面板 —— 那个面板是调参用的，跟设置是两回事
-    if (slotPressedIndex === SETTINGS_SLOT_INDEX && slotHoverIndex === SETTINGS_SLOT_INDEX) {
-      settingsOpen = !settingsOpen;
-      filePanelOpen = false;  // 弹窗互斥：开一个就把另外两个关掉，避免底板叠在一起、也保证同时只有一个按钮亮着
-      tutorialOpen = false;
+    if (S.slotPressedIndex === SETTINGS_SLOT_INDEX && S.slotHoverIndex === SETTINGS_SLOT_INDEX) {
+      S.settingsOpen = !S.settingsOpen;
+      S.filePanelOpen = false;  // 弹窗互斥：开一个就把另外两个关掉，避免底板叠在一起、也保证同时只有一个按钮亮着
+      S.tutorialOpen = false;
     }
     // 文件按钮：判定规则与设置按钮完全一致，同样是「按下又松开在同一按钮上」才算一次点击
-    if (slotPressedIndex === FILE_SLOT_INDEX && slotHoverIndex === FILE_SLOT_INDEX) {
-      filePanelOpen = !filePanelOpen;
-      settingsOpen = false;   // 同上，反向互斥
-      tutorialOpen = false;
+    if (S.slotPressedIndex === FILE_SLOT_INDEX && S.slotHoverIndex === FILE_SLOT_INDEX) {
+      S.filePanelOpen = !S.filePanelOpen;
+      S.settingsOpen = false;   // 同上，反向互斥
+      S.tutorialOpen = false;
     }
     // 教程按钮：判定规则同前两个按钮，按下又松开在同一按钮上才算一次点击
     // 打开时屏幕正中弹出教程窗口；一并把另外两个弹窗关掉，三个按钮同一时刻只有一个亮着
-    if (slotPressedIndex === TUTORIAL_SLOT_INDEX && slotHoverIndex === TUTORIAL_SLOT_INDEX) {
-      tutorialOpen = !tutorialOpen;
-      settingsOpen = false;
-      filePanelOpen = false;
+    if (S.slotPressedIndex === TUTORIAL_SLOT_INDEX && S.slotHoverIndex === TUTORIAL_SLOT_INDEX) {
+      S.tutorialOpen = !S.tutorialOpen;
+      S.settingsOpen = false;
+      S.filePanelOpen = false;
     }
-    slotPressedIndex = -1;  // 不论哪个键松开都退出按下态，所以放在提前 return 之前
+    S.slotPressedIndex = -1;  // 不论哪个键松开都退出按下态，所以放在提前 return 之前
     // 拉框收尾放在最前：松开左键必须把拉框结掉，否则框会一直挂在屏幕上
-    if (e.pointerId === marqueePointerId) endMarquee(e);
-    if (e.pointerId === movePointerId) endMove(e);  // 拖动收尾：清落点被覆盖的元件并复位状态
-    if (e.pointerId === labelPointerId) endLabelDrag(e);  // 拖标签收尾：只收状态并记一步，标签留在松手处的方位
-    if (e.pointerId === textPointerId) endTextDrag(e);    // 拖浮动文本收尾：只收状态并记一步，文字留在松手处
+    if (e.pointerId === S.marqueePointerId) endMarquee(e);
+    if (e.pointerId === S.movePointerId) endMove(e);  // 拖动收尾：清落点被覆盖的元件并复位状态
+    if (e.pointerId === S.labelPointerId) endLabelDrag(e);  // 拖标签收尾：只收状态并记一步，标签留在松手处的方位
+    if (e.pointerId === S.textPointerId) endTextDrag(e);    // 拖浮动文本收尾：只收状态并记一步，文字留在松手处
     if (e.pointerId !== state.panPointerId) return;
     endPan(e.pointerId);
   });
 
   // 指针被系统取消（如触控被中断）时也要收尾，否则会卡在拖拽态或按下态
-  canvas.addEventListener("pointercancel", function (e) {
-    slotPressedIndex = -1;  // 系统取消不算一次点击，只退出按下态
-    if (e.pointerId === marqueePointerId) cancelMarquee(e);  // 拉框也要一并收掉，否则框会留在屏幕上
-    if (e.pointerId === movePointerId) cancelMove(e);  // 拖动被系统打断：元件退回原位再收状态
-    if (e.pointerId === labelPointerId) cancelLabelDrag(e);  // 拖标签被打断：标签退回按下时的方位
-    if (e.pointerId === textPointerId) cancelTextDrag(e);    // 拖浮动文本被打断：文字退回按下时的位置
+  S.canvas.addEventListener("pointercancel", function (e) {
+    S.slotPressedIndex = -1;  // 系统取消不算一次点击，只退出按下态
+    if (e.pointerId === S.marqueePointerId) cancelMarquee(e);  // 拉框也要一并收掉，否则框会留在屏幕上
+    if (e.pointerId === S.movePointerId) cancelMove(e);  // 拖动被系统打断：元件退回原位再收状态
+    if (e.pointerId === S.labelPointerId) cancelLabelDrag(e);  // 拖标签被打断：标签退回按下时的方位
+    if (e.pointerId === S.textPointerId) cancelTextDrag(e);    // 拖浮动文本被打断：文字退回按下时的位置
     if (e.pointerId !== state.panPointerId) return;
     endPan(e.pointerId);
   });
@@ -263,12 +263,12 @@ function setupInput() {
   window.addEventListener("resize", function () {
     resizeCanvas();
     resizeElementLayer();
-    sceneDirty = true;  // 画布尺寸变了，整屏内容都要按新尺寸重画
+    S.sceneDirty = true;  // 画布尺寸变了，整屏内容都要按新尺寸重画
   });
 
   // 标签页切回来时画布内容可能已被系统丢弃，强制重绘一次，避免留下一片空白
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden) sceneDirty = true;
+    if (!document.hidden) S.sceneDirty = true;
   });
 
   // 粘贴：只在这里挂一次，挂在 document 上而不是画布上——焦点落在哪个元素都能收到
@@ -281,19 +281,19 @@ function setupInput() {
   window.addEventListener("keydown", function (e) {
     // 先更新修饰键自己的按下状态：这一步必须在所有提前返回之前，
     // 否则状态会与真实键盘脱节（例如在输入条里、或教程窗口开着时按下的 Cmd 会被漏记）
-    if (e.key === "Meta") metaHeld = true;
-    else if (e.key === "Control") ctrlHeld = true;
+    if (e.key === "Meta") S.metaHeld = true;
+    else if (e.key === "Control") S.ctrlHeld = true;
     // 确认弹窗开着时，只认两个键：Esc 当作取消，回车当作同意；其余快捷键一律不响应
     // 排在最前面拦：它压在教程窗口之上，是当下唯一该回应的东西
-    if (confirmOpen) {
+    if (S.confirmOpen) {
       if (e.code === "Escape") settleConfirm(false);
       else if (e.code === "Enter" || e.code === "NumpadEnter") settleConfirm(true);
       return;
     }
     // 教程窗口开着时，画布的快捷键一律不响应，只留 Esc 把它关掉
     // 放在最前面拦：它是模态窗口，在它前面按 WASD 不该把后面被挡住的元件转了
-    if (tutorialOpen) {
-      if (e.code === "Escape") tutorialOpen = false;  // Esc 是关模态窗口的通用习惯，顺手支持一下
+    if (S.tutorialOpen) {
+      if (e.code === "Escape") S.tutorialOpen = false;  // Esc 是关模态窗口的通用习惯，顺手支持一下
       return;
     }
     // 焦点在文本框里时整段让路：就地给存档起名的那一行，以及以后可能出现的任何输入框
@@ -306,7 +306,7 @@ function setupInput() {
     // 用键位码而不是键名，避免中文输入法把键名改掉；Mac 认 Cmd，其它平台认 Ctrl
     if (e.code === "KeyS" && cmdKeyHeld(e)) {
       e.preventDefault();
-      saveKeyDone = true;   // 记下这一轮已经在按下这一步处理过，抬起 KeyS 时不再补存一次
+      S.saveKeyDone = true;   // 记下这一轮已经在按下这一步处理过，抬起 KeyS 时不再补存一次
       // 按住不放会一路重复触发：不拦的话一次长按就能排出十几趟写盘，它们堵在同一把文件锁上等着，
       // 圆点会一口气呼吸很久，而真正写进去的只有最后那一趟
       if (e.repeat) return;
@@ -338,7 +338,7 @@ function setupInput() {
     if (e.code === "Backquote") {
       e.preventDefault();
       setSelectedSlot(SELECT_SLOT_INDEX);
-      sceneDirty = true;  // 选中高亮与手上虚影都变了，静止时也得重绘一帧才看得到
+      S.sceneDirty = true;  // 选中高亮与手上虚影都变了，静止时也得重绘一帧才看得到
       return;
     }
     // P 或 F2：开关注能读数面板。面板本身就带调色滑块，两件事共用一个开关，不必再加第二个快捷键
@@ -354,7 +354,7 @@ function setupInput() {
     // 带 Cmd / Ctrl 时不抢：那两个修饰键下的数字是浏览器的切换标签页
     const rightDigit = digitKeyIndex(e.code);
     if (rightDigit >= 0 && e.shiftKey && !cmdKeyHeld(e)) {
-      const box = rightBarToolsDom.children[rightDigit];
+      const box = S.rightBarToolsDom.children[rightDigit];
       if (box) {
         e.preventDefault();
         pressRightBarBox(box);   // 键盘没有物理按住，先补一次按下态，收缩动画与鼠标点击完全一样
@@ -375,7 +375,7 @@ function setupInput() {
         // 补一次与鼠标点击同源的按下反馈：没有物理按住，由一段短计时把缩小再回弹演完
         pressSlotByKey(slot);
         // 选中高亮是画在画布上的：不标脏的话，静止时这一帧会被整帧跳过，上面看着像没反应
-        sceneDirty = true;
+        S.sceneDirty = true;
       }
       return;
     }
@@ -388,15 +388,15 @@ function setupInput() {
       if (deleteSelection()) return;
       // 没有选区才回到老行为：删指针所在格的元件
       // 指针已经离开画布时不响应：位置还停在最后一次进入画布的地方，照做会误删
-      if (pointerInside) deleteElementAtScreen(pointerSX, pointerSY);
+      if (S.pointerInside) deleteElementAtScreen(S.pointerSX, S.pointerSY);
       return;
     }
     // Enter：在指针所在格放置手上选中的元件，与左键点空格完全等价
     // 小键盘的回车键位码不同，一并认下，否则小键盘按了没反应
     if (e.code === "Enter" || e.code === "NumpadEnter") {
-      if (pointerInside) {
+      if (S.pointerInside) {
         e.preventDefault();
-        placeElementAtScreen(pointerSX, pointerSY);
+        placeElementAtScreen(S.pointerSX, S.pointerSY);
       }
       return;
     }
@@ -416,7 +416,7 @@ function setupInput() {
     // 顺位二：没有选区、但指针正悬停在某个元件上，就转那个元件本身
     if (rotateHoveredElement(dirKey)) return;
     // 顺位三：都没有才转虚影；此时改的是手上元件的朝向，与指针是否压着元件无关
-    ghostAngleTarget += shortestTurnTo(ghostAngleTarget, dirKey * 90);
+    S.ghostAngleTarget += shortestTurnTo(S.ghostAngleTarget, dirKey * 90);
   });
 
   // 抬起：维护修饰键的按下状态，并给保存补一次机会
@@ -424,17 +424,17 @@ function setupInput() {
   // 于是被当成普通的 s 丢掉（长按之所以「有用」，正是因为随后连发的重复事件里 Cmd 已经按下了）；
   // 等到抬起 S 时 Cmd 通常已经按着，在这一刻补上，短按与长按就都能存
   window.addEventListener("keyup", function (e) {
-    if (e.key === "Meta") metaHeld = false;
-    else if (e.key === "Control") ctrlHeld = false;
+    if (e.key === "Meta") S.metaHeld = false;
+    else if (e.key === "Control") S.ctrlHeld = false;
     if (e.code !== "KeyS") return;
-    const handled = saveKeyDone;
-    saveKeyDone = false;   // 不论补不补，这一轮到此结束，下一轮重新计
+    const handled = S.saveKeyDone;
+    S.saveKeyDone = false;   // 不论补不补，这一轮到此结束，下一轮重新计
     if (handled) return;   // 按下那一步已经存过了，别再存一次
     // 同一条让路规则里再补上文本框：焦点在框里时，这一下是在打字母 s，不是在按保存
     if (isTextEntry(e.target)) return;
     // 让路规则与按下那一步完全一致：模态窗口开着时，快捷键一律不响应
     // 少了这一句，按下被挡掉、抬起却补存一次，同一个按法会因为按的长短得出不同结果
-    if (confirmOpen || tutorialOpen) return;
+    if (S.confirmOpen || S.tutorialOpen) return;
     if (!cmdKeyHeld(e)) return;   // 抬起时也没按着 Cmd/Ctrl，说明这一下就是普通的 s（转朝向），不管
     onSaveFile();
   });
@@ -442,16 +442,16 @@ function setupInput() {
   // 失焦：键盘已经不归本页面了，抬起事件收不到，必须把按下状态清掉
   // 不清的话，在别处松开 Cmd 之后，回到页面按一下普通的 s 会被误认成 Cmd+S
   window.addEventListener("blur", function () {
-    metaHeld = false;
-    ctrlHeld = false;
-    saveKeyDone = false;
+    S.metaHeld = false;
+    S.ctrlHeld = false;
+    S.saveKeyDone = false;
   });
 
   // 关标签页、刷新、从地址栏跳走之前拦一道：有未保存的改动就弹浏览器自带的确认
   // 提示文字由浏览器统一决定（各家都固定了措辞，页面改不了），这里只能决定弹不弹
   // 保存刚交出去、收尾还没落地的那几秒也算：文件还没换成新的，此刻关掉等于丢掉这一趟
   window.addEventListener("beforeunload", function (e) {
-    if (docDirty !== true && pendingCommit === null) return;  // 与磁盘一致且不在收尾，让它走
+    if (S.docDirty !== true && pendingCommit === null) return;  // 与磁盘一致且不在收尾，让它走
     e.preventDefault();    // 现代浏览器：拦下默认动作，弹出确认框
     e.returnValue = true;  // 老浏览器只看这个返回值，赋一个真值就表示「要确认」
   });
@@ -459,8 +459,8 @@ function setupInput() {
 
 // 统一收尾拖拽：释放指针捕获并复位拖拽相关状态
 function endPan(pointerId) {
-  if (canvas.hasPointerCapture(pointerId)) {
-    canvas.releasePointerCapture(pointerId);
+  if (S.canvas.hasPointerCapture(pointerId)) {
+    S.canvas.releasePointerCapture(pointerId);
   }
   state.isPanning = false;
   state.panPointerId = null;
@@ -492,45 +492,45 @@ function resetView() {
   state.panLastY = 0;
   state.lastTs = 0;
   // 虚影与指针状态一并复位，避免重开时残留上一局的虚影位置与动画进度
-  ghostVisible = false;
-  ghostAlpha = 0;
-  ghostRejectActive = false;
-  ghostRejectP = 0;
-  ghostRejectStartAlpha = 0;
-  ghostRejectFromWX = 0;
-  ghostRejectFromWY = 0;
-  ghostRejectToWX = 0;
-  ghostRejectToWY = 0;
+  S.ghostVisible = false;
+  S.ghostAlpha = 0;
+  S.ghostRejectActive = false;
+  S.ghostRejectP = 0;
+  S.ghostRejectStartAlpha = 0;
+  S.ghostRejectFromWX = 0;
+  S.ghostRejectFromWY = 0;
+  S.ghostRejectToWX = 0;
+  S.ghostRejectToWY = 0;
   // 朝向也复位成朝上，避免重开时虚影还停在上一局的朝向
-  ghostAngle = 0;
-  ghostAngleTarget = 0;
-  pointerInside = false;
+  S.ghostAngle = 0;
+  S.ghostAngleTarget = 0;
+  S.pointerInside = false;
   // 指针操作的中间状态一并复位：拉框与拖动都回到「没在操作」的状态，不留半截手势
-  marqueePressing = false;
-  marqueeActive = false;
-  marqueePointerId = -1;
-  moveDragging = false;
-  movePointerId = -1;
-  moveDGX = 0;
-  moveDGY = 0;
-  moveGroup.length = 0;
+  S.marqueePressing = false;
+  S.marqueeActive = false;
+  S.marqueePointerId = -1;
+  S.moveDragging = false;
+  S.movePointerId = -1;
+  S.moveDGX = 0;
+  S.moveDGY = 0;
+  S.moveGroup.length = 0;
   // 拖标签与拖浮动文本也一并收掉：两者都不会跨局延续，留着会让下一次拖动多认一个旧指针
-  labelDragging = false;
-  labelDragActive = false;
-  labelPointerId = -1;
-  labelDragEl = null;
-  textDragging = false;
-  textDragActive = false;
-  textPointerId = -1;
-  textDragEl = null;
-  orbitActive = false;   // 公转也一并复位，不留半截姿态
-  orbitP = 0;
-  orbitTurns = 0;
-  selOrientDir = 0;      // 选区朝向一并归零，重开一局后新选区仍默认朝上
+  S.labelDragging = false;
+  S.labelDragActive = false;
+  S.labelPointerId = -1;
+  S.labelDragEl = null;
+  S.textDragging = false;
+  S.textDragActive = false;
+  S.textPointerId = -1;
+  S.textDragEl = null;
+  S.orbitActive = false;   // 公转也一并复位，不留半截姿态
+  S.orbitP = 0;
+  S.orbitTurns = 0;
+  S.selOrientDir = 0;      // 选区朝向一并归零，重开一局后新选区仍默认朝上
   // 选项槽的悬停缩放状态一并复位，避免重开时残留上一局的悬停尺寸
   resetSlots();
   // 虚影形状跟着复位后的选中槽走；初始化时 ghostNode 还没建，applyGhostType 内部会跳过
   applyGhostType();
-  sceneDirty = true;  // 复位后画面与上一局完全不同，强制重绘一次
+  S.sceneDirty = true;  // 复位后画面与上一局完全不同，强制重绘一次
 }
 

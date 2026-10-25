@@ -28,8 +28,8 @@ window.debugPanel = {
 // 逐层开关的对外入口：改完自动标脏，下一帧就按新开关重画
 // 用法：perfLayers.set("lampGlow", true) 关掉灯光晕，改成 false 恢复
 window.perfLayers = {
-  skip: renderSkip,
-  set: function (layer, on) { renderSkip[layer] = on; sceneDirty = true; }
+  skip: S.renderSkip,
+  set: function (layer, on) { S.renderSkip[layer] = on; S.sceneDirty = true; }
 };
 
 /* ========== 压力测试 ========== */
@@ -53,7 +53,7 @@ function runStressTest(count) {
   }
   rebuildCellIndex();    // 批量直写期间已逐条挂过索引，这里整张重建一次，保证与元件表完全对齐
   resetSimBuffers();     // 元件下标整批换过了，按旧下标存的发射表与接收表必须作废
-  rayGraph.dirty = true; // 阻挡图留给下一微帧重建一趟，十万条也只重建这一次
+  S.rayGraph.dirty = true; // 阻挡图留给下一微帧重建一趟，十万条也只重建这一次
   invalidateElementCache();  // 元件缓存位图整张作废，下一帧按新场景重画
   // 视野一步调到「整片阵列刚好装进视口」：不调的话默认缩放只看得到阵心一小块，看不出规模
   const vp = getViewport();
@@ -68,7 +68,7 @@ function runStressTest(count) {
   state.anchorSY = vp.y + vp.h / 2;
   state.tAnchorSX = state.anchorSX;   // 目标与当前相等，不产生平移动画
   state.tAnchorSY = state.anchorSY;
-  sceneDirty = true;  // 强制下一帧重绘，否则静止判定可能直接跳过这一帧
+  S.sceneDirty = true;  // 强制下一帧重绘，否则静止判定可能直接跳过这一帧
   console.log("[压力测试] 已生成 " + n + " 个元件，阵列 " + side + " × " + side + " 格，缩放 " + scale.toFixed(2));
 }
 
@@ -90,7 +90,7 @@ const PERF_MAX_GAP_MS = 200;
 
 // 缓存读数区那几个 DOM 引用；面板即使隐藏着它们也存在，写一次文本的代价可以忽略
 function setupPerfReadout() {
-  perfDom = {
+  S.perfDom = {
     fps: document.getElementById("perfFps"),
     interval: document.getElementById("perfFrame"),
     script: document.getElementById("perfScript"),
@@ -104,35 +104,35 @@ function setupPerfReadout() {
 // 把最新读数写进面板
 // 面板没显示时整个跳过：读数只在需要看的时候才付出写 DOM 的代价
 function refreshPerfReadout() {
-  if (perfDom === null || !debugPanelVisible) return;
-  perfDom.fps.textContent = perfFps.toFixed(1);
-  perfDom.interval.textContent = perfIntervalMs.toFixed(1) + "ms";
-  perfDom.script.textContent = perfScriptMs.toFixed(2) + "ms";
-  perfDom.total.textContent = elements.length;
-  perfDom.drawn.textContent = drawnElementCount;
-  perfDom.culled.textContent = culledElementCount;
-  perfDom.scale.textContent = state.scale.toFixed(1);
+  if (S.perfDom === null || !debugPanelVisible) return;
+  S.perfDom.fps.textContent = S.perfFps.toFixed(1);
+  S.perfDom.interval.textContent = S.perfIntervalMs.toFixed(1) + "ms";
+  S.perfDom.script.textContent = S.perfScriptMs.toFixed(2) + "ms";
+  S.perfDom.total.textContent = S.elements.length;
+  S.perfDom.drawn.textContent = S.drawnElementCount;
+  S.perfDom.culled.textContent = S.culledElementCount;
+  S.perfDom.scale.textContent = state.scale.toFixed(1);
 }
 
 // 把本帧计入统计窗口，窗口攒满就结算一次读数并刷新面板
 // nowMs 用主循环拿到的 rAF 时间戳，它才是真正的帧间隔；scriptMs 是本帧全部脚本逻辑的耗时
 // 分开统计两件事的原因：帧间隔说明「浏览器给到多少帧」，脚本耗时说明「其中你占用了多少」，两者一起看才知道有没有优化空间
 function accumulatePerf(nowMs, scriptMs) {
-  const gap = perfLastTs > 0 ? nowMs - perfLastTs : 0;
-  perfLastTs = nowMs;
+  const gap = S.perfLastTs > 0 ? nowMs - S.perfLastTs : 0;
+  S.perfLastTs = nowMs;
   // 空档帧与首帧整帧丢掉：它们不代表稳态，算进去会让读数忽高忽低
   if (gap > 0 && gap < PERF_MAX_GAP_MS) {
-    perfWinFrames++;
-    perfWinMs += gap;
-    perfWinScriptMs += scriptMs;
+    S.perfWinFrames++;
+    S.perfWinMs += gap;
+    S.perfWinScriptMs += scriptMs;
   }
-  if (perfWinFrames === 0 || perfWinMs < PERF_WINDOW_MS) return;
-  perfFps = perfWinFrames * 1000 / perfWinMs;
-  perfIntervalMs = perfWinMs / perfWinFrames;
-  perfScriptMs = perfWinScriptMs / perfWinFrames;
-  perfWinFrames = 0;
-  perfWinMs = 0;
-  perfWinScriptMs = 0;
+  if (S.perfWinFrames === 0 || S.perfWinMs < PERF_WINDOW_MS) return;
+  S.perfFps = S.perfWinFrames * 1000 / S.perfWinMs;
+  S.perfIntervalMs = S.perfWinMs / S.perfWinFrames;
+  S.perfScriptMs = S.perfWinScriptMs / S.perfWinFrames;
+  S.perfWinFrames = 0;
+  S.perfWinMs = 0;
+  S.perfWinScriptMs = 0;
   refreshPerfReadout();
 }
 
@@ -159,18 +159,18 @@ function refreshSwatch(group, c) {
 // 让所有已放置元件的配色缓存作废：元件配色在渲染时按当前色值现算，这里只把缓存键清掉逼下一帧重算
 // 元件已不再挂 SVG 节点，所以不再逐个写节点属性，改配色只需让缓存失效
 function applyElementColors() {
-  for (let i = 0; i < elements.length; i++) {
+  for (let i = 0; i < S.elements.length; i++) {
     // 缓存键作废：若缓存还留着旧进度，下一帧会以为配色没变而跳过重算，颜色改了也不显示
-    elements[i].litK = -1;
+    S.elements[i].litK = -1;
   }
-  sceneDirty = true;  // 配色变了要重绘；否则静止判定会认为画面没变
+  S.sceneDirty = true;  // 配色变了要重绘；否则静止判定会认为画面没变
 }
 
 // 把元件那两组沙盒配色写到面板里的色块与色值文本；元件实际颜色固定取 elementHSL，这里只刷新显示
 function refreshElementColorUI() {
-  if (paletteUI === null) return;
-  refreshSwatch(paletteUI.fill, elementSandbox.fill);
-  refreshSwatch(paletteUI.stroke, elementSandbox.stroke);
+  if (S.paletteUI === null) return;
+  refreshSwatch(S.paletteUI.fill, elementSandbox.fill);
+  refreshSwatch(S.paletteUI.stroke, elementSandbox.stroke);
 }
 
 // 把一组 H/S/L 滑块接到一个配色对象上：target 直接是 {h,s,l}，prefix 是这组滑块的 id 前缀
@@ -192,31 +192,31 @@ function bindHSLGroup(target, prefix, onChange) {
 
 // 把沙盒配色写到面板里的色块与色值文本；底板实际颜色取 COLOR.panelFill，这里只刷新显示
 function refreshPanelColorUI() {
-  if (paletteUI === null) return;
-  refreshSwatch(paletteUI.panel, panelHSL);
+  if (S.paletteUI === null) return;
+  refreshSwatch(S.paletteUI.panel, panelHSL);
 }
 
 // 把槽填充的沙盒配色写到面板里的色块与色值文本；槽实际填充取 COLOR.slotFill，这里只刷新显示
 function refreshSlotColorUI() {
-  if (paletteUI === null) return;
-  refreshSwatch(paletteUI.slot, slotHSL);
+  if (S.paletteUI === null) return;
+  refreshSwatch(S.paletteUI.slot, slotHSL);
 }
 
 // 把设置那四组沙盒配色写到面板里的色块与色值文本；画面颜色固定取 settingsHSL，这里只刷新显示
 // 所以拖这四组滑块不会改动画面上任何东西，纯粹是取色参考
 function refreshSettingsColorUI() {
-  if (paletteUI === null) return;
-  refreshSwatch(paletteUI.gearFill, settingsSandbox.gearFill);
-  refreshSwatch(paletteUI.gearStroke, settingsSandbox.gearStroke);
-  refreshSwatch(paletteUI.setFill, settingsSandbox.slotFill);
-  refreshSwatch(paletteUI.setStroke, settingsSandbox.slotStroke);
+  if (S.paletteUI === null) return;
+  refreshSwatch(S.paletteUI.gearFill, settingsSandbox.gearFill);
+  refreshSwatch(S.paletteUI.gearStroke, settingsSandbox.gearStroke);
+  refreshSwatch(S.paletteUI.setFill, settingsSandbox.slotFill);
+  refreshSwatch(S.paletteUI.setStroke, settingsSandbox.slotStroke);
 }
 
 // 初始化调试面板：缓存根节点与色块引用、绑定四组滑块、同步一次显示（面板保持隐藏）
 function setupDebugPanel() {
   debugPanelEl = document.getElementById("debugPanel");
   setupPerfReadout();  // 读数区的 DOM 引用与面板一起缓存，读数是面板的第一组内容
-  paletteUI = {
+  S.paletteUI = {
     fill: {
       sw: document.getElementById("swFill"),
       code: document.getElementById("codeFill")

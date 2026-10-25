@@ -20,14 +20,14 @@ function elementLabelSize(el) {
   if (hit !== null && hit.text === el.labelText && hit.fontPx === fontPx) return hit.size;
   const lineH = fontPx * CONFIG.labelLineHeight;
   const lines = splitLabelLines(el.labelText);
-  ctx.save();
-  ctx.font = fontPx + "px " + UI_FONT;   // 量宽度前必须先设字体，否则量到的是上一次留在上下文里的字体
+  S.ctx.save();
+  S.ctx.font = fontPx + "px " + UI_FONT;   // 量宽度前必须先设字体，否则量到的是上一次留在上下文里的字体
   let w = 0;
   for (let i = 0; i < lines.length; i++) {
-    const lw = ctx.measureText(lines[i]).width;
+    const lw = S.ctx.measureText(lines[i]).width;
     if (lw > w) w = lw;
   }
-  ctx.restore();
+  S.ctx.restore();
   const size = { w: w, h: lineH * lines.length, fontPx: fontPx, lineH: lineH, lines: lines };
   el.labelSize = { text: el.labelText, fontPx: fontPx, size: size };
   return size;
@@ -81,35 +81,35 @@ function elementHasLabel(el) {
 // 也不做「字太小就改画一个灰块」：那样会在某个阈值上突然从深浅不匀的一片变成整齐的方块；
 // 而字号连续变小时，字形本来就按覆盖面积算像素亮度，这份亮度差别正是「这里有字」的信息
 function drawElementLabels(vp) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(vp.x, vp.y, vp.w, vp.h);  // 裁剪到视口：标签不会画到上方面板与底栏上
-  ctx.clip();
-  ctx.fillStyle = COLOR.labelText;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  S.ctx.save();
+  S.ctx.beginPath();
+  S.ctx.rect(vp.x, vp.y, vp.w, vp.h);  // 裁剪到视口：标签不会画到上方面板与底栏上
+  S.ctx.clip();
+  S.ctx.fillStyle = COLOR.labelText;
+  S.ctx.textAlign = "center";
+  S.ctx.textBaseline = "middle";
   // 所有标签共用一个字号，所以字体只在这里设一次：逐块重设字体是这一趟里最贵的动作
-  ctx.font = (CONFIG.labelFontSize * state.scale) + "px " + UI_FONT;
+  S.ctx.font = (CONFIG.labelFontSize * state.scale) + "px " + UI_FONT;
   const pad = CONFIG.labelHitPad;
   // 只走活跃表：有标签的元件必定在表里（判据里就带着「标签文字非空」这一条），十万个元件里其余的不必每帧再筛一遍
   let labelN = 0;   // 探针读数：这一帧真正画出来的标签块数
-  for (let i = 0; i < activeEls.length; i++) {
-    const el = activeEls[i];
+  for (let i = 0; i < S.activeEls.length; i++) {
+    const el = S.activeEls[i];
     if (!elementHasLabel(el)) continue;
     const b = elementLabelBox(el);
     // 视口剔除：整块文字都在视口外就跳过，连绘制都不提交
     if (b.x + b.w + pad < vp.x || b.x - pad > vp.x + vp.w ||
         b.y + b.h + pad < vp.y || b.y - pad > vp.y + vp.h) continue;
     // 删除动画：文字跟着元件一起淡出，不会留下半透明的字挂在原地
-    ctx.globalAlpha = el.deleting ? 1 - easeOutCubic(el.deleteP) : 1;
+    S.ctx.globalAlpha = el.deleting ? 1 - easeOutCubic(el.deleteP) : 1;
     for (let k = 0; k < b.lines.length; k++) {
       if (b.lines[k] === "") continue;  // 空行不画字，但仍占一行高度：多行文字里的空行是有意义的
-      ctx.fillText(b.lines[k], b.x + b.w / 2, b.y + b.lineH * (k + 0.5));
+      S.ctx.fillText(b.lines[k], b.x + b.w / 2, b.y + b.lineH * (k + 0.5));
     }
     labelN++;
   }
-  ctx.globalAlpha = 1;  // 透明度是上下文状态，用完必须还原，否则会漏给后面的绘制
-  ctx.restore();
+  S.ctx.globalAlpha = 1;  // 透明度是上下文状态，用完必须还原，否则会漏给后面的绘制
+  S.ctx.restore();
   pval("标签", labelN);   // 探针读数：画了多少块标签，对应上面这趟文字绘制的规模
 }
 
@@ -121,8 +121,8 @@ function drawElementLabels(vp) {
 function labelAtPointer(sx, sy) {
   const pad = CONFIG.labelHitPad;
   let hit = null;
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     if (!elementHasLabel(el)) continue;
     const b = elementLabelBox(el);
     if (sx >= b.x - pad && sx <= b.x + b.w + pad && sy >= b.y - pad && sy <= b.y + b.h + pad) hit = el;
@@ -135,15 +135,15 @@ function labelAtPointer(sx, sy) {
 // 按下标签：进入「按住了」状态，并记下此刻的方位与距离，供拖动被系统打断时摆回原处
 // 此刻先不挪标签：双击标签是要改文字，若按下就把标签摆到指下的方位，双击的第一下会把它抖歪
 function beginLabelDrag(e, el) {
-  labelDragging = true;
-  labelDragActive = false;
-  labelPointerId = e.pointerId;
-  labelDragEl = el;
-  labelDragStartSX = e.clientX;
-  labelDragStartSY = e.clientY;
-  labelDragFromAngle = el.labelAngle;
-  labelDragFromGap = el.labelGap;
-  canvas.setPointerCapture(e.pointerId);
+  S.labelDragging = true;
+  S.labelDragActive = false;
+  S.labelPointerId = e.pointerId;
+  S.labelDragEl = el;
+  S.labelDragStartSX = e.clientX;
+  S.labelDragStartSY = e.clientY;
+  S.labelDragFromAngle = el.labelAngle;
+  S.labelDragFromGap = el.labelGap;
+  S.canvas.setPointerCapture(e.pointerId);
 }
 
 // 拖动标签：方位角与距离一起跟着指针走，等于让标签在元件身旁那一圈浅环里挪动
@@ -154,14 +154,14 @@ function beginLabelDrag(e, el) {
 // 方位角按需吸附：按住 Shift 吸附到 45° 的整数倍，与大多数画图软件的习惯一致
 // 默认不吸附：密集布局里固定那几个方向可能全被邻居占住，连续的角度反而总能找到空隙
 function moveLabelDrag(e) {
-  if (!labelDragging || e.pointerId !== labelPointerId || labelDragEl === null) return;
-  if (!labelDragActive) {
-    const mdx = e.clientX - labelDragStartSX;
-    const mdy = e.clientY - labelDragStartSY;
+  if (!S.labelDragging || e.pointerId !== S.labelPointerId || S.labelDragEl === null) return;
+  if (!S.labelDragActive) {
+    const mdx = e.clientX - S.labelDragStartSX;
+    const mdy = e.clientY - S.labelDragStartSY;
     if (mdx * mdx + mdy * mdy < CONFIG.marqueeThreshold * CONFIG.marqueeThreshold) return;
-    labelDragActive = true;  // 移过阈值，从这一刻起才算真的在拖
+    S.labelDragActive = true;  // 移过阈值，从这一刻起才算真的在拖
   }
-  const el = labelDragEl;
+  const el = S.labelDragEl;
   const dx = e.clientX - worldToScreenX(el.wx + el.mvOffU);   // 指针相对元件格心的横向屏幕差
   const dy = e.clientY - worldToScreenY(el.wy + el.mvOffV);   // 纵向屏幕差
   const distPx = Math.sqrt(dx * dx + dy * dy);
@@ -176,34 +176,34 @@ function moveLabelDrag(e) {
   const size = elementLabelSize(el);
   const gap = distPx / state.scale - elementLabelSupport(el, size);
   el.labelGap = Math.min(CONFIG.labelGapMax, Math.max(CONFIG.labelGapMin, gap));
-  sceneDirty = true;  // 标签位置变了，静止时也得重绘一帧才看得到
+  S.sceneDirty = true;  // 标签位置变了，静止时也得重绘一帧才看得到
 }
 
 // 松开标签：收状态并记一步；方位或距离变了，撤销要能把标签摆回原处
 function endLabelDrag(e) {
-  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
-  const moved = labelDragEl;
-  labelDragging = false;
-  labelDragActive = false;
-  labelPointerId = -1;
-  labelDragEl = null;
-  sceneDirty = true;
+  if (S.canvas.hasPointerCapture(e.pointerId)) S.canvas.releasePointerCapture(e.pointerId);
+  const moved = S.labelDragEl;
+  S.labelDragging = false;
+  S.labelDragActive = false;
+  S.labelPointerId = -1;
+  S.labelDragEl = null;
+  S.sceneDirty = true;
   // 记一步由 commitHistory 自己比对：按下没动就松开时它什么都不记，不会白占一步
   if (moved !== null) commitHistory();
 }
 
 // 拖动被系统打断（如触控中断）：把标签摆回原处再收状态，与拖动元件被打断时的处理一致
 function cancelLabelDrag(e) {
-  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
-  if (labelDragEl !== null) {
-    labelDragEl.labelAngle = labelDragFromAngle;
-    labelDragEl.labelGap = labelDragFromGap;
+  if (S.canvas.hasPointerCapture(e.pointerId)) S.canvas.releasePointerCapture(e.pointerId);
+  if (S.labelDragEl !== null) {
+    S.labelDragEl.labelAngle = S.labelDragFromAngle;
+    S.labelDragEl.labelGap = S.labelDragFromGap;
   }
-  labelDragging = false;
-  labelDragActive = false;
-  labelPointerId = -1;
-  labelDragEl = null;
-  sceneDirty = true;
+  S.labelDragging = false;
+  S.labelDragActive = false;
+  S.labelPointerId = -1;
+  S.labelDragEl = null;
+  S.sceneDirty = true;
 }
 
 /* ========== 改标签文字的输入框 ========== */
@@ -212,36 +212,36 @@ function cancelLabelDrag(e) {
 // 这一下点击还在处理中，浏览器随后可能把焦点还给画布；少了后面那一帧，
 // 用户会看到框弹出来了却打不进字，必须先手动点一下框才行
 function focusLabelEditorInput() {
-  labelEditorInputDom.focus();
-  labelEditorInputDom.select();
+  S.labelEditorInputDom.focus();
+  S.labelEditorInputDom.select();
   requestAnimationFrame(function () {
     // 期间用户可能已经把框关掉了（例如按了 Esc），所以这一帧要再确认一次它还开着
-    if (!labelEditorOpen) return;
-    labelEditorInputDom.focus();
-    labelEditorInputDom.select();
+    if (!S.labelEditorOpen) return;
+    S.labelEditorInputDom.focus();
+    S.labelEditorInputDom.select();
   });
 }
 
 // 打开输入框：把当前文字填进去并全选，焦点交给输入框
 function openLabelEditor(el) {
-  labelEditorEl = el;
-  labelEditorInputDom.value = el.labelText;
-  labelEditorOpen = true;
+  S.labelEditorEl = el;
+  S.labelEditorInputDom.value = el.labelText;
+  S.labelEditorOpen = true;
   focusLabelEditorInput();
 }
 
 // 关掉输入框并作答：ok 为真表示把框里的文字写回元件，为假表示放弃这次改动
 // 文字清空即删掉标签：这是「怎么取消一个标签」最自然的做法，不必再单独做一个删除按钮
 function closeLabelEditor(ok) {
-  const el = labelEditorEl;
-  labelEditorOpen = false;
-  labelEditorEl = null;
+  const el = S.labelEditorEl;
+  S.labelEditorOpen = false;
+  S.labelEditorEl = null;
   if (!ok || el === null) return;   // 放弃改动：元件上的文字一动没动，连一步历史都不必记
-  const text = labelEditorInputDom.value.trim();  // 首尾空白去掉：误敲的空格不该变成一段「看不见的标签」
+  const text = S.labelEditorInputDom.value.trim();  // 首尾空白去掉：误敲的空格不该变成一段「看不见的标签」
   if (text === el.labelText) return;              // 文字没变就不记步，免得空改一次也占掉一步撤销
   el.labelText = text;
   commitHistory();  // 改文字就是在改存档内容，改完就该能撤销
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 
 // 输入框里的键盘：回车确定、Esc 放弃
@@ -261,35 +261,35 @@ function onLabelEditorKeydown(e) {
 // 每帧把输入框同步到画面：只动透明度，不动位置
 // 特意不加位移：这个弹窗靠 CSS 的 translate(-50%, -50%) 居中，再写 transform 会把居中整个覆盖掉
 function renderLabelEditor() {
-  const p = labelEditorAnim.cur;
-  if (!labelEditorOpen && p <= 0.001) {
-    if (labelEditorDom.style.display !== "none") labelEditorDom.style.display = "none";
+  const p = S.labelEditorAnim.cur;
+  if (!S.labelEditorOpen && p <= 0.001) {
+    if (S.labelEditorDom.style.display !== "none") S.labelEditorDom.style.display = "none";
     return;
   }
   // 显示时必须写成 flex：这一层的内部布局要靠弹性布局纵向排开，样式表里的 .popup 是 display:none，
   // 若只把内联样式清空，读回来的还是 none，框会「开了却看不见」
-  if (labelEditorDom.style.display !== "flex") labelEditorDom.style.display = "flex";
-  labelEditorDom.style.opacity = p;
+  if (S.labelEditorDom.style.display !== "flex") S.labelEditorDom.style.display = "flex";
+  S.labelEditorDom.style.opacity = p;
 }
 
 // 初始化输入框：外观从 CONFIG / COLOR 注入，与另外几个弹窗同一套，只做一次
 // 键盘只接在这个输入框自己身上：Enter 确定、Esc 放弃，两条都不必再回到全局键盘那条通道里去判
 function initLabelEditorDom() {
-  labelEditorDom.style.width = CONFIG.confirmPanelW + "px";
-  labelEditorDom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
-  labelEditorDom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
-  labelEditorDom.style.background = COLOR.tipFill;     // 与另外四个弹窗同色：都是浮在网格上的浅蓝底板
-  labelEditorDom.style.borderColor = COLOR.tipBorder;  // 与面板、视口边框同色，整页仍是同一套外框
-  labelEditorDom.style.color = COLOR.tipDesc;
-  labelEditorDom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
-  labelEditorInputDom.style.color = COLOR.labelText;   // 框里的字用画布上那个近黑，所见即所得
-  labelEditorInputDom.addEventListener("keydown", onLabelEditorKeydown);
+  S.labelEditorDom.style.width = CONFIG.confirmPanelW + "px";
+  S.labelEditorDom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
+  S.labelEditorDom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
+  S.labelEditorDom.style.background = COLOR.tipFill;     // 与另外四个弹窗同色：都是浮在网格上的浅蓝底板
+  S.labelEditorDom.style.borderColor = COLOR.tipBorder;  // 与面板、视口边框同色，整页仍是同一套外框
+  S.labelEditorDom.style.color = COLOR.tipDesc;
+  S.labelEditorDom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
+  S.labelEditorInputDom.style.color = COLOR.labelText;   // 框里的字用画布上那个近黑，所见即所得
+  S.labelEditorInputDom.addEventListener("keydown", onLabelEditorKeydown);
   // 抬起同样拦下：全局键盘那条通道里也有 keyup，不让它跟着处理一次
-  labelEditorInputDom.addEventListener("keyup", function (e) { e.stopPropagation(); });
-  btnLabelOkDom.addEventListener("click", function () { closeLabelEditor(true); });
-  btnLabelCancelDom.addEventListener("click", function () { closeLabelEditor(false); });
+  S.labelEditorInputDom.addEventListener("keyup", function (e) { e.stopPropagation(); });
+  S.btnLabelOkDom.addEventListener("click", function () { closeLabelEditor(true); });
+  S.btnLabelCancelDom.addEventListener("click", function () { closeLabelEditor(false); });
   // 按下按钮时不让它抢走焦点：与另外四个弹窗同一套处理，否则输入框会失焦、光标位置也丢了
-  labelEditorDom.addEventListener("mousedown", function (e) {
+  S.labelEditorDom.addEventListener("mousedown", function (e) {
     if (e.target.classList.contains("btn")) e.preventDefault();
   });
 }
@@ -297,7 +297,7 @@ function initLabelEditorDom() {
 // 双击画布时该改谁的标签：点在标签上就改那块标签对应的元件，点在元件上就改这个元件，都没有就不响应
 // 两条路都归到同一个输入框，用户不必分清自己点的是文字还是图形
 function beginLabelEditingAtPointer() {
-  const el = labelAtPointer(pointerSX, pointerSY);
+  const el = labelAtPointer(S.pointerSX, S.pointerSY);
   if (el !== null) { openLabelEditor(el); return true; }
   const hovered = findElementAtPointer();
   if (hovered !== null && !hovered.deleting) { openLabelEditor(hovered); return true; }

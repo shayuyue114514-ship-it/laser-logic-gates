@@ -130,7 +130,7 @@ function elementPathD(typeId) {
 // 气泡分支与 SVG 侧取同一组几何数，描出的外轮廓完全一致，两边不会各自漂移
 function traceElementPath(typeId, target) {
   const t = ELEMENT_TYPES[typeId];
-  const c = target || ctx;   // 目标可以是当前画布上下文，也可以是 Path2D：两者都有下面这几个路径方法
+  const c = target || S.ctx;   // 目标可以是当前画布上下文，也可以是 Path2D：两者都有下面这几个路径方法
   if (target === undefined) c.beginPath();   // Path2D 本身就是一条新路径，不需要清空
   if (t.bubble) {
     const g = bubbleGeometry(typeId);
@@ -158,11 +158,11 @@ function traceElementPath(typeId, target) {
 // 取一种元件类型的轮廓对象：形状只由类型决定，与位置、朝向、缩放无关，所以每种类型只建一次
 // 绘制时只换坐标系再 stroke/fill 同一个对象，逐帧重建路径（moveTo/lineTo/arc）的开销就此消失
 function elementPathObject(typeId) {
-  let p = elementPathCache.get(typeId);
+  let p = S.elementPathCache.get(typeId);
   if (p === undefined) {
     p = new Path2D();
     traceElementPath(typeId, p);
-    elementPathCache.set(typeId, p);
+    S.elementPathCache.set(typeId, p);
   }
   return p;
 }
@@ -172,8 +172,8 @@ function elementPathObject(typeId) {
 // 选中槽与文本槽都不是元件槽，没有对应类型，返回 null：调用方据此知道「手上没拿元件」
 // 返回 null 会一并让虚影收起来、左键放置元件那条路直接不响应，两条都由同一个判据分出去
 function selectedTypeId() {
-  if (slotSelectedIndex === SELECT_SLOT_INDEX) return null;
-  if (slotSelectedIndex === TEXT_SLOT_INDEX) return null;
-  return PANEL_SLOT_TYPES[slotSelectedIndex - ELEMENT_SLOT_BASE];
+  if (S.slotSelectedIndex === SELECT_SLOT_INDEX) return null;
+  if (S.slotSelectedIndex === TEXT_SLOT_INDEX) return null;
+  return PANEL_SLOT_TYPES[S.slotSelectedIndex - ELEMENT_SLOT_BASE];
 }
 

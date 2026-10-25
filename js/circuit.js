@@ -24,16 +24,16 @@ let simFullPass = true;   // boolean：要不要对全部门整表重排一次�
 // 结算缓冲按需扩容：元件表变长时把发射表与接收表一起撑大，旧内容照抄，不清零
 // 为什么用定型数组：每微帧新建一个十万长的普通数组会让垃圾回收跟着帧率一起抖
 function ensureSimBuffers() {
-  const n = elements.length;
+  const n = S.elements.length;
   if (emit.length < n) { const next = new Uint8Array(n); next.set(emit); emit = next; }
-  if (recvMask.length < n) { const next = new Uint8Array(n); next.set(recvMask); recvMask = next; }
+  if (S.recvMask.length < n) { const next = new Uint8Array(n); next.set(S.recvMask); S.recvMask = next; }
 }
 
 // 把结算层按下标存的东西整体作废：元件下标一变（压实、读档、清空），这些内容必须清零重来
 // 分类表（光源/门/灯）不在这里重建，它们由阻挡图重建那一趟顺手重算，那里本来就扫全表
 function resetSimBuffers() {
   emit.fill(0);
-  recvMask.fill(0);
+  S.recvMask.fill(0);
   gateOuts.length = 0;
   recvEls.length = 0;
   recvPrev.length = 0;
@@ -72,8 +72,8 @@ function rebuildRayGraph() {
   lampEls.length = 0;
   // 正在删除的、以及悬空的元件都不参与模拟：前者算「已被删掉」，后者算「还没放进世界」
   // 悬空即被选中；选中等于离地，要等落位（取消选中）那一刻才回到电路里
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
     el.idx = i;   // 元件在元件表里的下标：发射表与接收表都按它存，增删之后必须重新对齐
     // 位置统一吸附回格心：几何的唯一真相是整数格号，坐标只是它的显示形态
     // 每次重建都校正一次，历史数据或异常操作留下的偏差到这里就被抹平，不会再出现某个元件从阻挡图里漏掉
@@ -101,13 +101,13 @@ function rebuildRayGraph() {
   }
   // 排序之后「第一个阻挡者」就退化成数组上的一次邻项扫描，不用再比坐标
   rows.forEach(function (arr) {
-    arr.sort(function (a, b) { return gxOf(elements[a]) - gxOf(elements[b]); });
+    arr.sort(function (a, b) { return gxOf(S.elements[a]) - gxOf(S.elements[b]); });
   });
   cols.forEach(function (arr) {
-    arr.sort(function (a, b) { return gyOf(elements[a]) - gyOf(elements[b]); });
+    arr.sort(function (a, b) { return gyOf(S.elements[a]) - gyOf(S.elements[b]); });
   });
 
-  const n = elements.length;
+  const n = S.elements.length;
   const endR = new Array(n).fill(-1);
   const endL = new Array(n).fill(-1);
   const endD = new Array(n).fill(-1);
@@ -121,14 +121,14 @@ function rebuildRayGraph() {
     for (let p = k - 1; p >= 0; p--) {
       const i = arr[p];
       endR[i] = next;
-      if (blocksGlobal(elements[i], true)) next = p;
+      if (blocksGlobal(S.elements[i], true)) next = p;
     }
     // 行内向左：从左往右扫，没人挡记 -1
     let prev = -1;
     for (let p = 0; p < k; p++) {
       const i = arr[p];
       endL[i] = prev;
-      if (blocksGlobal(elements[i], true)) prev = p;
+      if (blocksGlobal(S.elements[i], true)) prev = p;
     }
   });
 
@@ -139,28 +139,28 @@ function rebuildRayGraph() {
     for (let p = k - 1; p >= 0; p--) {
       const i = arr[p];
       endU[i] = next;   // 下标更大 = wy 更大 = 视觉更靠上，所以这是「向上」的阻挡者
-      if (blocksGlobal(elements[i], false)) next = p;
+      if (blocksGlobal(S.elements[i], false)) next = p;
     }
     let prev = -1;
     for (let p = 0; p < k; p++) {
       const i = arr[p];
       endD[i] = prev;   // 下标更小 = wy 更小 = 视觉更靠下
-      if (blocksGlobal(elements[i], false)) prev = p;
+      if (blocksGlobal(S.elements[i], false)) prev = p;
     }
   });
 
-  rayGraph.rows = rows;
-  rayGraph.cols = cols;
-  rayGraph.endR = endR;
-  rayGraph.endL = endL;
-  rayGraph.endD = endD;
-  rayGraph.endU = endU;
-  rayGraph.dirty = false;
+  S.rayGraph.rows = rows;
+  S.rayGraph.cols = cols;
+  S.rayGraph.endR = endR;
+  S.rayGraph.endL = endL;
+  S.rayGraph.endD = endD;
+  S.rayGraph.endU = endU;
+  S.rayGraph.dirty = false;
 
   // 几何全变了，按下标存的发射表与接收表一律清零，再按各门自己记着的 out 重新登记「正在发射的门」
   // out 是推演状态，不随几何变化：它跟着元件走，所以这里读出来接着用，不重置
   emit.fill(0);
-  recvMask.fill(0);
+  S.recvMask.fill(0);
   gateOuts.length = 0;
   recvEls.length = 0;
   recvPrev.length = 0;
@@ -180,24 +180,24 @@ function rebuildRayGraph() {
 // 返回「本微帧开头的发射表与上一微帧有没有差异」，零延迟模式靠它判断链是否已经停住
 function stepMicroframe() {
   // 元件增删或朝向定下来之后才重建阻挡图；重建会让上一微帧的发射表作废，必须重算
-  if (rayGraph.dirty) rebuildRayGraph();
+  if (S.rayGraph.dirty) rebuildRayGraph();
   const diff = buildEmitMask();
   // 发射表与上一微帧完全一致时，激光场与接收掩码必然不变，跳过重算
   // 既省掉空转时的重复计算，也让下面那几张小表只在真有变化时才动
   if (simEmitDiff) {
     recomputeMasks();
-    laserSegments = computeLaserSegments();
+    S.laserSegments = computeLaserSegments();
     scheduleOutputs();   // 按本微帧的接收排下一微帧的输出，微时序的 1 帧延迟就落在这一步
     updateLampInputs();  // 顺手把接收结果落到灯身上，决定它这一微帧亮不亮
     simEmitDiff = false;
     simFullPass = false;
-    sceneDirty = true;   // 激光场变了，强制重绘一次，否则静止判定会把这次变化吞掉
+    S.sceneDirty = true;   // 激光场变了，强制重绘一次，否则静止判定会把这次变化吞掉
     // 探针读数：本微帧真正参与运算的规模。这几个数直接说明稀疏化有没有生效——它们应当远小于元件总数
     pval("发射行列", emitRowKeys.size + emitColKeys.size);
     pval("接收元件", recvEls.length);
-    pval("激光段", laserSegments.length);
+    pval("激光段", S.laserSegments.length);
   }
-  microframe++;  // 时钟自增：本微帧的结算已完成，进入下一微帧
+  S.microframe++;  // 时钟自增：本微帧的结算已完成，进入下一微帧
   return diff;
 }
 
@@ -211,37 +211,37 @@ function refreshLightField() {
   // 暂停时连几何重算也一并冻结：删元件、挪元件、选中离地都不该让激光当场变化
   // 否则暂停只冻住了时间推进，画面上的光却仍跟着编辑走，看起来就像「暂停了还在算」
   // 这里只把阻挡图标脏，等恢复时按那一刻的电路统一重算一次，光和元件才对得上
-  if (!rightToolRunning) {
-    rayGraph.dirty = true;
+  if (!S.rightToolRunning) {
+    S.rayGraph.dirty = true;
     return;
   }
-  if (rayGraph.dirty) rebuildRayGraph();
+  if (S.rayGraph.dirty) rebuildRayGraph();
   buildEmitMask();
   recomputeMasks();
-  laserSegments = computeLaserSegments();
+  S.laserSegments = computeLaserSegments();
   updateLampInputs();   // 顺手把「现在照到谁」落到灯身上，免得灯要等下一个微帧才亮
-  sceneDirty = true;
+  S.sceneDirty = true;
 }
 
 // 清掉激光：不碰元件位置、朝向与光源开关，只把「光」这一层全部作废
 // 关键是元件自己记着「这一微帧往哪射」的那份记录要一起清，否则下一次重算会拿旧记录把光原样画回来
 // 清完之后有光源的电路会从下一微帧重新点火、逐微帧往下传，光不会再一瞬间整张复原
 function resetLaserField() {
-  for (let i = 0; i < elements.length; i++) {
-    elements[i].out = 0;      // 门记着的输出方向清零，等于忘掉自己正在发光
-    elements[i].inOut = false;  // 同时退出「正在发射的门」那张小表
+  for (let i = 0; i < S.elements.length; i++) {
+    S.elements[i].out = 0;      // 门记着的输出方向清零，等于忘掉自己正在发光
+    S.elements[i].inOut = false;  // 同时退出「正在发射的门」那张小表
   }
   emit.fill(0);               // 发射表清零，下一微帧收集时会按光源开关重新填
-  recvMask.fill(0);           // 接收掩码清零，灯与门的输入从「没收到」重新算起
+  S.recvMask.fill(0);           // 接收掩码清零，灯与门的输入从「没收到」重新算起
   gateOuts.length = 0;        // 待排输出的门清空，链条从源头重来
   recvEls.length = 0;
   recvPrev.length = 0;
-  laserSegments = [];         // 画面上的激光线段整份清空
+  S.laserSegments = [];         // 画面上的激光线段整份清空
   for (let i = 0; i < lampEls.length; i++) lampEls[i].litIn = false;  // 灯回到不亮
   simEmitDiff = true;         // 明确要求下一微帧重算，不靠旧发射表跳过
   simFullPass = true;         // 灯按整表重排一遍，免得稀疏表里漏掉刚清掉的灯
-  microAcc = 0;               // 丢掉半截微帧，从干净的边界重新计
-  sceneDirty = true;          // 强制重画一次，否则静止判定会把这次清除吞掉
+  S.microAcc = 0;               // 丢掉半截微帧，从干净的边界重新计
+  S.sceneDirty = true;          // 强制重画一次，否则静止判定会把这次清除吞掉
 }
 
 // 按当前微帧时长推进时钟：把本帧真实时长换算成微帧数逐个结算
@@ -251,24 +251,24 @@ function stepSimulation(dt) {
   // 运行开关停在「暂停」：这一帧不做任何结算，微帧时钟也不走，整条逻辑链冻在原地
   // 累加余数一并清零：不攒时间，恢复时就不会把暂停期间的时间一次性补算成几十个微帧
   // 编辑动作自己会调 refreshLightField 按新几何重算一次，所以暂停期间挪元件、放元件，画面照样跟手
-  if (!rightToolRunning) {
-    microAcc = 0;
+  if (!S.rightToolRunning) {
+    S.microAcc = 0;
     pcount("微帧", 0);
     return;
   }
   // 速度滑块拉到最左端：不设延迟，本帧内直接把整条链结算到底，不等真实时间
-  if (microDt <= 0) {
+  if (S.microDt <= 0) {
     runToQuiescence();
     return;
   }
-  microAcc += dt;
+  S.microAcc += dt;
   let steps = 0;
-  while (microAcc >= microDt && steps < CONFIG.maxStepsPerFrame) {
-    microAcc -= microDt;
+  while (S.microAcc >= S.microDt && steps < CONFIG.maxStepsPerFrame) {
+    S.microAcc -= S.microDt;
     stepMicroframe();
     steps++;
   }
-  if (microAcc >= microDt) microAcc = 0;
+  if (S.microAcc >= S.microDt) S.microAcc = 0;
   pcount("微帧", steps);   // 探针读数：本帧实际结算了几个微帧
 }
 
@@ -277,7 +277,7 @@ function stepSimulation(dt) {
 // 元件之间那 1 微帧的延迟仍然保留，只是不再等真实时间，逻辑语义与慢速时完全一致
 // 每一微帧只沿着几张发射/接收的小表走，所以这条循环的长度不再与元件总数挂钩
 function runToQuiescence() {
-  microAcc = 0;  // 零延迟下不攒余数，否则切回慢速时会突然补算一帧
+  S.microAcc = 0;  // 零延迟下不攒余数，否则切回慢速时会突然补算一帧
   let steps = 0;   // 探针读数：这一帧为了跑到底结算了几个微帧
   for (let i = 0; i < CONFIG.maxQuiescentSteps; i++) {
     steps++;
@@ -333,17 +333,17 @@ function updateLampInputs() {
   if (simFullPass) {
     for (let j = 0; j < lampEls.length; j++) {
       const el = lampEls[j];
-      el.litIn = recvMask[el.idx] !== 0;
+      el.litIn = S.recvMask[el.idx] !== 0;
     }
     return;
   }
   for (let j = 0; j < recvPrev.length; j++) {
     const el = recvPrev[j];
-    if (el.typeId === "lamp") el.litIn = recvMask[el.idx] !== 0;
+    if (el.typeId === "lamp") el.litIn = S.recvMask[el.idx] !== 0;
   }
   for (let j = 0; j < recvEls.length; j++) {
     const el = recvEls[j];
-    if (el.typeId === "lamp") el.litIn = recvMask[el.idx] !== 0;
+    if (el.typeId === "lamp") el.litIn = S.recvMask[el.idx] !== 0;
   }
 }
 
@@ -356,17 +356,17 @@ function scheduleOutputs() {
   if (simFullPass) {
     for (let j = 0; j < gateEls.length; j++) {
       const el = gateEls[j];
-      applyGateOutput(el, recvMask[el.idx]);
+      applyGateOutput(el, S.recvMask[el.idx]);
     }
     return;
   }
   for (let j = 0; j < recvPrev.length; j++) {
     const el = recvPrev[j];
-    if (recvMask[el.idx] === 0) applyGateOutput(el, 0);
+    if (S.recvMask[el.idx] === 0) applyGateOutput(el, 0);
   }
   for (let j = 0; j < recvEls.length; j++) {
     const el = recvEls[j];
-    applyGateOutput(el, recvMask[el.idx]);
+    applyGateOutput(el, S.recvMask[el.idx]);
   }
 }
 
@@ -393,7 +393,7 @@ function applyGateOutput(el, recv) {
 // 只扫有发射者的行列：没有发射者的行列既射不出光，也没有人能收到光，扫它纯属白干
 function recomputeMasks() {
   // 上一微帧收到光的那些元件，掩码先全部归零：本微帧的光照重新扫一遍，没被照到的自然留在零上
-  for (let j = 0; j < recvEls.length; j++) recvMask[recvEls[j].idx] = 0;
+  for (let j = 0; j < recvEls.length; j++) S.recvMask[recvEls[j].idx] = 0;
   // 两张表交换：recvPrev 收下「上一微帧谁在接收」，排输出时要照顾其中刚失去输入的那批
   const spare = recvPrev;
   recvPrev = recvEls;
@@ -403,49 +403,49 @@ function recomputeMasks() {
   // 行：从左往右，reach 是「左边所有朝右发射的激光里，能覆盖到的最右位置」
   // 键是整数格号，与阻挡图的行键同源，因此不会因为坐标精度而查不到这一行
   emitRowKeys.forEach(function (gy) {
-    const arr = rayGraph.rows.get(gy);
+    const arr = S.rayGraph.rows.get(gy);
     if (arr === undefined) return;   // 这一行现在没有存活元件了
     const k = arr.length;
     let reach = -1;
     for (let p = 0; p < k; p++) {
       const i = arr[p];
       // 先判后记，严格不等式把元件自己排除在外：自己发的光不该算成自己的输入
-      if (reach >= p) markRecv(i, SIDE_LEFT);
-      if (emit[i] & SIDE_RIGHT) reach = Math.max(reach, rayGraph.endR[i]);
+      if (reach >= p) markRecv(i, S.SIDE_LEFT);
+      if (emit[i] & S.SIDE_RIGHT) reach = Math.max(reach, S.rayGraph.endR[i]);
     }
     // 行：从右往左，reach2 是「右边所有朝左发射的激光里，能覆盖到的最左位置」
     let reach2 = k;
     for (let p = k - 1; p >= 0; p--) {
       const i = arr[p];
-      if (reach2 <= p) markRecv(i, SIDE_RIGHT);
-      if (emit[i] & SIDE_LEFT) reach2 = Math.min(reach2, rayGraph.endL[i]);
+      if (reach2 <= p) markRecv(i, S.SIDE_RIGHT);
+      if (emit[i] & S.SIDE_LEFT) reach2 = Math.min(reach2, S.rayGraph.endL[i]);
     }
   });
 
   // 列：列数组按 wy 升序，下标增大方向是「上」，两趟扫描的逻辑与行完全一致
   emitColKeys.forEach(function (gx) {
-    const arr = rayGraph.cols.get(gx);
+    const arr = S.rayGraph.cols.get(gx);
     if (arr === undefined) return;
     const k = arr.length;
     let reach = -1;
     for (let p = 0; p < k; p++) {
       const i = arr[p];
-      if (reach >= p) markRecv(i, SIDE_DOWN);   // 来自更小下标 = wy 更小 = 视觉下方
-      if (emit[i] & SIDE_UP) reach = Math.max(reach, rayGraph.endU[i]);
+      if (reach >= p) markRecv(i, S.SIDE_DOWN);   // 来自更小下标 = wy 更小 = 视觉下方
+      if (emit[i] & S.SIDE_UP) reach = Math.max(reach, S.rayGraph.endU[i]);
     }
     let reach2 = k;
     for (let p = k - 1; p >= 0; p--) {
       const i = arr[p];
-      if (reach2 <= p) markRecv(i, SIDE_UP);    // 来自更大下标 = wy 更大 = 视觉上方
-      if (emit[i] & SIDE_DOWN) reach2 = Math.min(reach2, rayGraph.endD[i]);
+      if (reach2 <= p) markRecv(i, S.SIDE_UP);    // 来自更大下标 = wy 更大 = 视觉上方
+      if (emit[i] & S.SIDE_DOWN) reach2 = Math.min(reach2, S.rayGraph.endD[i]);
     }
   });
 }
 
 // 给某个元件记下「这一侧有光射到」：掩码从零变非零时把它收进本微帧的接收表，供排输出那一步使用
 function markRecv(i, side) {
-  if (recvMask[i] === 0) recvEls.push(elements[i]);
-  recvMask[i] |= side;
+  if (S.recvMask[i] === 0) recvEls.push(S.elements[i]);
+  S.recvMask[i] |= side;
 }
 
 // 合并同一行（或同一列）上的区间：按起点排序后一遍扫过，与上一段相接或重叠就并进去
@@ -471,7 +471,7 @@ function mergeSpans(spans) {
 function spanToWorld(arr, key, p) {
   if (p === -1) return -Infinity;
   if (p === arr.length) return Infinity;
-  return elements[arr[p]][key];
+  return S.elements[arr[p]][key];
 }
 
 // 单微帧的激光场：先按阻挡图给每条射线定出两端，再按行、按列各自取并集
@@ -483,14 +483,14 @@ function computeLaserSegments() {
 
   // 行：固定坐标是格号 gy，变化坐标是 wx；输出时把格号换回格心世界坐标，绘制端不必知道这套键
   emitRowKeys.forEach(function (gy) {
-    const arr = rayGraph.rows.get(gy);
+    const arr = S.rayGraph.rows.get(gy);
     if (arr === undefined) return;
     const k = arr.length;
     const spans = [];
     for (let p = 0; p < k; p++) {
       const i = arr[p];
-      if (emit[i] & SIDE_RIGHT) spans.push([p, rayGraph.endR[i]]);  // 向右：起点是自己，终点是右边最近的阻挡者
-      if (emit[i] & SIDE_LEFT) spans.push([rayGraph.endL[i], p]);   // 向左：起点是左边最近的阻挡者，终点是自己
+      if (emit[i] & S.SIDE_RIGHT) spans.push([p, S.rayGraph.endR[i]]);  // 向右：起点是自己，终点是右边最近的阻挡者
+      if (emit[i] & S.SIDE_LEFT) spans.push([S.rayGraph.endL[i], p]);   // 向左：起点是左边最近的阻挡者，终点是自己
     }
     const merged = mergeSpans(spans);
     for (let j = 0; j < merged.length; j++) {
@@ -504,14 +504,14 @@ function computeLaserSegments() {
 
   // 列：固定坐标是格号 gx，变化坐标是 wy
   emitColKeys.forEach(function (gx) {
-    const arr = rayGraph.cols.get(gx);
+    const arr = S.rayGraph.cols.get(gx);
     if (arr === undefined) return;
     const k = arr.length;
     const spans = [];
     for (let p = 0; p < k; p++) {
       const i = arr[p];
-      if (emit[i] & SIDE_UP) spans.push([p, rayGraph.endU[i]]);    // 向上：起点是自己，终点是上方最近的阻挡者
-      if (emit[i] & SIDE_DOWN) spans.push([rayGraph.endD[i], p]);  // 向下：起点是下方最近的阻挡者，终点是自己
+      if (emit[i] & S.SIDE_UP) spans.push([p, S.rayGraph.endU[i]]);    // 向上：起点是自己，终点是上方最近的阻挡者
+      if (emit[i] & S.SIDE_DOWN) spans.push([S.rayGraph.endD[i], p]);  // 向下：起点是下方最近的阻挡者，终点是自己
     }
     const merged = mergeSpans(spans);
     for (let j = 0; j < merged.length; j++) {

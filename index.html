@@ -130,11 +130,13 @@
      element-types.js 与 circuit.js 是元件形状表与电路结算引擎，首页两侧的演示电路跑的就是编辑器同一套，
      它们依赖 CONFIG 与 ELEMENT_TYPES，所以只能排在 config.js 之后、home.js 之前；
      icons.js 与 tutorial-content.js 也是两个页面共用的那两份，home.js 借它们画图标、填教程正文。
-     其余的编辑器脚本（state.js、files.js、input.js 等）首页一概不引：那些是编辑职责，封面用不到。 -->
+     state.js 是共享状态容器：首页的演示引擎与编辑器读写的是同一份状态，所以两页都引它；
+     其余的编辑器脚本（files.js、input.js 等）首页一概不引：那些是编辑职责，封面用不到。 -->
 <script src="js/util.js"></script>
 <script src="js/config.js"></script>
 <script src="js/handle-store.js"></script>
 <script src="js/element-types.js"></script>
+<script src="js/state.js"></script>
 <script src="js/circuit.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/tutorial-content.js"></script>

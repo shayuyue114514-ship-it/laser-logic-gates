@@ -8,21 +8,21 @@
 // 只做定位以外的外观；栏里的存档列表由 sidebar.js 生成，与这里分工不重叠
 function initSidebarDom() {
   const gap = CONFIG.panelGap;
-  sidebarDom.style.left = gap + "px";             // 左侧同样留出间隙，不贴到窗口最左沿
-  sidebarDom.style.top = gap + "px";              // 顶边与上方面板的顶边齐平
-  sidebarDom.style.bottom = gap + "px";           // 底边与底栏的底边齐平
-  sidebarDom.style.width = CONFIG.sidebarWidth + "px";
-  sidebarDom.style.background = COLOR.panelFill;  // 与上方面板、底栏同色：整页的框是同一套
-  sidebarDom.style.borderColor = COLOR.border;    // 与视口、面板边框同色，整页外框仍是一个色系
-  sidebarDom.style.color = COLOR.tipDesc;
+  S.sidebarDom.style.left = gap + "px";             // 左侧同样留出间隙，不贴到窗口最左沿
+  S.sidebarDom.style.top = gap + "px";              // 顶边与上方面板的顶边齐平
+  S.sidebarDom.style.bottom = gap + "px";           // 底边与底栏的底边齐平
+  S.sidebarDom.style.width = CONFIG.sidebarWidth + "px";
+  S.sidebarDom.style.background = COLOR.panelFill;  // 与上方面板、底栏同色：整页的框是同一套
+  S.sidebarDom.style.borderColor = COLOR.border;    // 与视口、面板边框同色，整页外框仍是一个色系
+  S.sidebarDom.style.color = COLOR.tipDesc;
   // 右侧工具栏与左侧竖栏同一套规矩：上下右各内缩一个 gap，配色同源，只是宽度按自己那份配置取
   // 两栏左右对称，上方那条面板与底栏夹在它们中间，整页的框仍然是一个整体
-  rightBarDom.style.right = gap + "px";
-  rightBarDom.style.top = gap + "px";
-  rightBarDom.style.bottom = gap + "px";
-  rightBarDom.style.width = CONFIG.rightbarWidth + "px";
-  rightBarDom.style.background = COLOR.panelFill;
-  rightBarDom.style.borderColor = COLOR.border;
+  S.rightBarDom.style.right = gap + "px";
+  S.rightBarDom.style.top = gap + "px";
+  S.rightBarDom.style.bottom = gap + "px";
+  S.rightBarDom.style.width = CONFIG.rightbarWidth + "px";
+  S.rightBarDom.style.background = COLOR.panelFill;
+  S.rightBarDom.style.borderColor = COLOR.border;
   initRightBarTools();
 }
 
@@ -32,10 +32,10 @@ function initSidebarDom() {
 function initRightBarTools() {
   // 四个颜色挂在栏上做成变量：默认态与选中态各一对，样式表按变量取色，JS 只管加类
   // 取值与元件槽同一套（未选中取槽的常态色，选中取槽的提亮色），所以两处的「被选中」看起来是一回事
-  rightBarToolsDom.style.setProperty("--rb-fill", COLOR.rightToolFill);
-  rightBarToolsDom.style.setProperty("--rb-border", COLOR.slotBorder);
-  rightBarToolsDom.style.setProperty("--rb-fill-on", COLOR.slotFillSelected);
-  rightBarToolsDom.style.setProperty("--rb-border-on", COLOR.slotBorderSelected);
+  S.rightBarToolsDom.style.setProperty("--rb-fill", COLOR.rightToolFill);
+  S.rightBarToolsDom.style.setProperty("--rb-border", COLOR.slotBorder);
+  S.rightBarToolsDom.style.setProperty("--rb-fill-on", COLOR.slotFillSelected);
+  S.rightBarToolsDom.style.setProperty("--rb-border-on", COLOR.slotBorderSelected);
   for (let i = 0; i < CONFIG.rightToolCount; i++) {
     const box = document.createElement("div");
     box.className = "rb-tool";
@@ -64,17 +64,17 @@ function initRightBarTools() {
       // 点击落到第几格就选中第几格：闭包里的 i 是当次生成的值，不会随循环变化
       box.addEventListener("click", function () { selectRightTool(i); });
     }
-    rightBarToolsDom.appendChild(box);
+    S.rightBarToolsDom.appendChild(box);
   }
   // 栏内滚动时名称小窗会留在原地，直接收起最省事：指针再停上去会重新算位置
-  rightBarDom.addEventListener("scroll", hideRightBarTip);
+  S.rightBarDom.addEventListener("scroll", hideRightBarTip);
 }
 
 // 排一个延时的名称显示：每次进入新格子都先把上一个待显示的任务取消，指针扫过去时一列里只会响最后一次
 function scheduleRightBarTip(box) {
-  clearTimeout(rightBarTipTimer);
-  rightBarTipTimer = setTimeout(function () {
-    rightBarTipTimer = 0;
+  clearTimeout(S.rightBarTipTimer);
+  S.rightBarTipTimer = setTimeout(function () {
+    S.rightBarTipTimer = 0;
     showRightBarTip(box);
   }, CONFIG.rightBarTipDelay * 1000);
 }
@@ -84,20 +84,20 @@ function scheduleRightBarTip(box) {
 function showRightBarTip(box) {
   const name = box.dataset.toolName;
   if (!name) return;   // 这一格还没功能，也就没有名字，不弹小窗
-  rightBarTipDom.textContent = name;
-  rightBarTipDom.style.display = "block";
+  S.rightBarTipDom.textContent = name;
+  S.rightBarTipDom.style.display = "block";
   const r = box.getBoundingClientRect();
-  const tw = rightBarTipDom.offsetWidth;
-  const th = rightBarTipDom.offsetHeight;
-  rightBarTipDom.style.left = (r.left - 8 - tw) + "px";
-  rightBarTipDom.style.top = (r.top + (r.height - th) / 2) + "px";
+  const tw = S.rightBarTipDom.offsetWidth;
+  const th = S.rightBarTipDom.offsetHeight;
+  S.rightBarTipDom.style.left = (r.left - 8 - tw) + "px";
+  S.rightBarTipDom.style.top = (r.top + (r.height - th) / 2) + "px";
 }
 
 // 收起名称小窗：顺手把待显示的延时也取消，指针离开后就不会再冒出来
 function hideRightBarTip() {
-  clearTimeout(rightBarTipTimer);
-  rightBarTipTimer = 0;
-  rightBarTipDom.style.display = "none";
+  clearTimeout(S.rightBarTipTimer);
+  S.rightBarTipTimer = 0;
+  S.rightBarTipDom.style.display = "none";
 }
 
 // 状态槽的「运行中」图标：一个朝右的等边三角形
@@ -198,22 +198,22 @@ function buildStepIcon(color) {
 // 运行中点它先切到暂停，否则下一帧时钟立刻把这一步推走，单步的效果看不出来
 // 余数一并清零：暂停期间攒下的时间若留着，恢复运行时会一次性补算成几十个微帧
 function stepRightForward() {
-  if (rightToolRunning) toggleRightState(rightBarToolsDom.children[0]);
-  microAcc = 0;
+  if (S.rightToolRunning) toggleRightState(S.rightBarToolsDom.children[0]);
+  S.microAcc = 0;
   stepMicroframe();
-  sceneDirty = true;   // 哪怕本微帧没有差异也重画一次，画面与刚走完的状态保持一致
+  S.sceneDirty = true;   // 哪怕本微帧没有差异也重画一次，画面与刚走完的状态保持一致
 }
 
 // 切换状态槽：翻转运行状态与 paused 类，两个图标由样式表按类露出其一
 // 这一刻同时接管电路结算的总闸：暂停后微帧时钟不再走，恢复后从当前状态接着算
 // 恢复时清掉时间余数并按当前几何把激光场摆正，避免暂停期间改过的电路在恢复的第一帧出现旧光
 function toggleRightState(box) {
-  rightToolRunning = !rightToolRunning;
-  box.classList.toggle("paused", !rightToolRunning);
-  microAcc = 0;
-  if (rightToolRunning) {
+  S.rightToolRunning = !S.rightToolRunning;
+  box.classList.toggle("paused", !S.rightToolRunning);
+  S.microAcc = 0;
+  if (S.rightToolRunning) {
     refreshLightField();   // 按当前元件与朝向重算一遍光场，与恢复后的时钟从同一状态起步
-    sceneDirty = true;
+    S.sceneDirty = true;
   }
 }
 
@@ -230,9 +230,9 @@ function pressRightBarBox(box) {
 // 选中右侧工具栏的第几格：单选，点新的就把旧的取消掉；点已经选中的那一格不做动作
 // 只改状态与类名，颜色与缩放的过渡都交给样式表，这里不逐帧推进任何动画
 function selectRightTool(index) {
-  if (rightToolSelected === index) return;
-  rightToolSelected = index;
-  const boxes = rightBarToolsDom.children;
+  if (S.rightToolSelected === index) return;
+  S.rightToolSelected = index;
+  const boxes = S.rightBarToolsDom.children;
   for (let i = 0; i < boxes.length; i++) {
     boxes[i].classList.toggle("on", i === index);
   }
@@ -272,47 +272,47 @@ function initPopupDom(dom) {
 
 // 初始化设置弹窗：注入通用外观，再单独接上它自己的三个控件
 function initSettingsPanelDom() {
-  initPopupDom(settingsPanelDom);
+  initPopupDom(S.settingsPanelDom);
   // 面板里的控件只在这一处绑定：init 只跑一次，监听器不会重复注册
-  gridSwitchDom.addEventListener("click", toggleGridRender);
-  advSwitchDom.addEventListener("click", toggleAdvancedRender);
-  speedSliderDom.addEventListener("input", onSpeedSliderInput);
-  renderPrecisionSliderDom.addEventListener("input", onRenderPrecisionInput);
-  zoomRefreshSliderDom.addEventListener("input", onZoomRefreshInput);
+  S.gridSwitchDom.addEventListener("click", toggleGridRender);
+  S.advSwitchDom.addEventListener("click", toggleAdvancedRender);
+  S.speedSliderDom.addEventListener("input", onSpeedSliderInput);
+  S.renderPrecisionSliderDom.addEventListener("input", onRenderPrecisionInput);
+  S.zoomRefreshSliderDom.addEventListener("input", onZoomRefreshInput);
   // 滑块的范围与初始位置都由配置推出来：HTML 里不写死刻度，改配置就能整体挪动
-  speedSliderDom.min = "0";
-  speedSliderDom.max = String(CONFIG.speedSliderSteps);
-  speedSliderDom.step = "1";
-  speedSliderDom.value = String(dtToSpeedSlider(CONFIG.microframeDt));
-  microDt = speedSliderToDt(Number(speedSliderDom.value));  // 以滑块为准反推一次，保证首帧速度与显示位置严格一致
+  S.speedSliderDom.min = "0";
+  S.speedSliderDom.max = String(CONFIG.speedSliderSteps);
+  S.speedSliderDom.step = "1";
+  S.speedSliderDom.value = String(dtToSpeedSlider(CONFIG.microframeDt));
+  S.microDt = speedSliderToDt(Number(S.speedSliderDom.value));  // 以滑块为准反推一次，保证首帧速度与显示位置严格一致
   updateSpeedValueLabel();                                  // 首帧也把数值写出来，不然打开设置面板时数字是空白的
   // 渲染精度滑块：范围与步长都取自配置，步长取 0.1 让「连续」这件事真的连续，而不是只剩几个档位
-  renderPrecisionSliderDom.min = String(CONFIG.renderPrecisionMin);
-  renderPrecisionSliderDom.max = String(CONFIG.renderPrecisionMax);
-  renderPrecisionSliderDom.step = "0.1";
-  renderPrecisionSliderDom.value = String(CONFIG.renderPrecisionDefault);
+  S.renderPrecisionSliderDom.min = String(CONFIG.renderPrecisionMin);
+  S.renderPrecisionSliderDom.max = String(CONFIG.renderPrecisionMax);
+  S.renderPrecisionSliderDom.step = "0.1";
+  S.renderPrecisionSliderDom.value = String(CONFIG.renderPrecisionDefault);
   updateRenderPrecisionLabel();   // 首帧写出精度读数，与画布此刻用的像素比一致
   // 缩放刷新速度滑块：步长取 0.05，1.05 到 3 之间都能连续调
-  zoomRefreshSliderDom.min = String(CONFIG.zoomRefreshMin);
-  zoomRefreshSliderDom.max = String(CONFIG.zoomRefreshMax);
-  zoomRefreshSliderDom.step = "0.05";
-  zoomRefreshSliderDom.value = String(CONFIG.zoomRefreshDefault);
+  S.zoomRefreshSliderDom.min = String(CONFIG.zoomRefreshMin);
+  S.zoomRefreshSliderDom.max = String(CONFIG.zoomRefreshMax);
+  S.zoomRefreshSliderDom.step = "0.05";
+  S.zoomRefreshSliderDom.value = String(CONFIG.zoomRefreshDefault);
   updateZoomRefreshLabel();       // 首帧写出阈值读数
 }
 
 // 初始化文件弹窗：注入通用外观，接上三个按钮，并把本地文件读写能力的检测结果写进那一行
 // 以后往文件弹窗里加控件，绑定也写在这一处，init 只跑一次，监听器不会重复注册
 function initFilePanelDom() {
-  initPopupDom(filePanelDom);
-  btnOpenDom.addEventListener("click", onOpenFile);
-  btnSaveDom.addEventListener("click", onSaveFile);
-  btnSaveAsDom.addEventListener("click", onSaveFileAs);
-  btnImportSelDom.addEventListener("click", onImportSelection);
-  btnExportSelDom.addEventListener("click", onExportSelection);
-  btnCopyAiDom.addEventListener("click", copyForAi);
+  initPopupDom(S.filePanelDom);
+  S.btnOpenDom.addEventListener("click", onOpenFile);
+  S.btnSaveDom.addEventListener("click", onSaveFile);
+  S.btnSaveAsDom.addEventListener("click", onSaveFileAs);
+  S.btnImportSelDom.addEventListener("click", onImportSelection);
+  S.btnExportSelDom.addEventListener("click", onExportSelection);
+  S.btnCopyAiDom.addEventListener("click", copyForAi);
   // 按下按钮时不让它抢走焦点：按钮一旦留着焦点，之后再按回车会被浏览器当成又点了一次，
   // 而画布要靠焦点才能响应键盘，焦点不该被按钮占着。拦掉按下时的默认行为即可，点击照常触发
-  filePanelDom.addEventListener("mousedown", function (e) {
+  S.filePanelDom.addEventListener("mousedown", function (e) {
     if (e.target.classList.contains("btn")) e.preventDefault();
   });
   refreshFileName();
@@ -321,31 +321,31 @@ function initFilePanelDom() {
 // 初始化教程弹窗：注入与设置、文件两个弹窗同款的底板外观，再摆好尺寸、接上取消按钮
 // 它不锚在按钮下方而是浮在屏幕正中，定位交给 CSS 的居中规则，所以这里只写尺寸与外观
 function initTutorialPanelDom() {
-  tutorialPanelDom.style.width = CONFIG.tutorialPanelW + "px";
-  tutorialPanelDom.style.height = CONFIG.tutorialPanelH + "px";
-  tutorialPanelDom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
-  tutorialPanelDom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
-  tutorialPanelDom.style.background = COLOR.tipFill;      // 与另外两个弹窗同色：都是浮在网格上的浅蓝底板
-  tutorialPanelDom.style.borderColor = COLOR.tipBorder;   // 与面板、视口边框同色，整页仍是同一套外框
-  tutorialPanelDom.style.color = COLOR.tipDesc;
-  tutorialPanelDom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
+  S.tutorialPanelDom.style.width = CONFIG.tutorialPanelW + "px";
+  S.tutorialPanelDom.style.height = CONFIG.tutorialPanelH + "px";
+  S.tutorialPanelDom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
+  S.tutorialPanelDom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
+  S.tutorialPanelDom.style.background = COLOR.tipFill;      // 与另外两个弹窗同色：都是浮在网格上的浅蓝底板
+  S.tutorialPanelDom.style.borderColor = COLOR.tipBorder;   // 与面板、视口边框同色，整页仍是同一套外框
+  S.tutorialPanelDom.style.color = COLOR.tipDesc;
+  S.tutorialPanelDom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
   // 内容区的取色不走 CSS：色值统一从 COLOR 取，同一个蓝不在样式表和脚本里各写一份，免得日后改一处漏一处
   // 底色特意取「未选中」那一档的蓝（slotFill，比窗口底板深一级）：本项目里白色代表选中，
   // 铺白底会把整块内容区误读成选中态；压暗一级反而正好读成凹进去的一块阅读区
-  tutorialDocDom.style.background = COLOR.slotFill;
-  tutorialDocDom.style.color = COLOR.tipDesc;  // 说明文字色，压在深一级的蓝上仍读得清
+  S.tutorialDocDom.style.background = COLOR.slotFill;
+  S.tutorialDocDom.style.color = COLOR.tipDesc;  // 说明文字色，压在深一级的蓝上仍读得清
   // 把教程正文自己的那套排版样式也装上：导语、过渡句、编号步骤、关键词药丸、结尾各有一档
   initTutorialDocStyle();
   // 把教程正文填进内容区：正文现在是有层级的 HTML，所以走 innerHTML；内容是本文件里的常量，不含任何外部输入
   // 只在这里赋值一次，之后开关窗口都沿用这份内容，不必每次重开都重写
-  tutorialDocDom.innerHTML = TUTORIAL_TEXT;
+  S.tutorialDocDom.innerHTML = TUTORIAL_TEXT;
   // 左上角那个叉形关闭按钮只在这一处绑定：init 只跑一次，监听器不会重复注册
-  btnTutorialCancelDom.addEventListener("click", function () {
-    tutorialOpen = false;  // 关掉教程窗口；内容不清空，下次再打开还是原来那份教程
+  S.btnTutorialCancelDom.addEventListener("click", function () {
+    S.tutorialOpen = false;  // 关掉教程窗口；内容不清空，下次再打开还是原来那份教程
   });
   // 按下按钮时不让它抢走焦点：与文件弹窗同样的处理，按钮只负责关窗，不需要长期持有焦点圈
   // 叉是画在按钮里的 SVG，但它的指针事件已经在样式里关掉了，所以这里拿到的 target 一定是按钮本身
-  tutorialPanelDom.addEventListener("mousedown", function (e) {
+  S.tutorialPanelDom.addEventListener("mousedown", function (e) {
     if (e.target.classList.contains("btn")) e.preventDefault();
   });
 }
@@ -363,37 +363,37 @@ function initTutorialPanelDom() {
 // 删除时写成「删除」，用户才清楚按下去会发生什么，而不是对着一句「丢弃」猜
 function askConfirm(text, okLabel) {
   return new Promise(function (resolve) {
-    confirmTextDom.textContent = text;   // 问话是数据，用 textContent 写入，不做任何转义或拼接
-    btnConfirmOkDom.textContent = okLabel === undefined ? "丢弃" : okLabel;
-    confirmResolve = resolve;
-    confirmOpen = true;                  // 显隐交给主循环里的缓动去推，这里只改状态
+    S.confirmTextDom.textContent = text;   // 问话是数据，用 textContent 写入，不做任何转义或拼接
+    S.btnConfirmOkDom.textContent = okLabel === undefined ? "丢弃" : okLabel;
+    S.confirmResolve = resolve;
+    S.confirmOpen = true;                  // 显隐交给主循环里的缓动去推，这里只改状态
   });
 }
 
 // 收起确认弹窗，并把答案交给等在后面的那段流程
 // 没人在等时（窗口已经收起后又收到一次作答）就只是把状态摆正，不会重复叫醒
 function settleConfirm(agree) {
-  confirmOpen = false;
-  const resolve = confirmResolve;
-  confirmResolve = null;   // 先摘掉再叫醒：万一那段流程里又弹一次确认框，不会被这一次作答当成自己的答案
+  S.confirmOpen = false;
+  const resolve = S.confirmResolve;
+  S.confirmResolve = null;   // 先摘掉再叫醒：万一那段流程里又弹一次确认框，不会被这一次作答当成自己的答案
   if (resolve !== null) resolve(agree);
 }
 
 // 初始化确认弹窗：底板与教程、设置两个弹窗同款，只是窄一些，内容只有一句问话和两个按钮
 // 两个按钮各自作答：右边表示同意（继续做那件会丢东西的事），左边表示放弃
 function initConfirmPanelDom() {
-  confirmPanelDom.style.width = CONFIG.confirmPanelW + "px";
-  confirmPanelDom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
-  confirmPanelDom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
-  confirmPanelDom.style.background = COLOR.tipFill;      // 与另外三个弹窗同色：都是浮在网格上的浅蓝底板
-  confirmPanelDom.style.borderColor = COLOR.tipBorder;   // 与面板、视口边框同色，整页仍是同一套外框
-  confirmPanelDom.style.color = COLOR.tipDesc;
-  confirmPanelDom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
-  confirmTextDom.style.color = COLOR.tipName;            // 问话用深一档的蓝，比次要说明更显眼
-  btnConfirmOkDom.addEventListener("click", function () { settleConfirm(true); });
-  btnConfirmCancelDom.addEventListener("click", function () { settleConfirm(false); });
+  S.confirmPanelDom.style.width = CONFIG.confirmPanelW + "px";
+  S.confirmPanelDom.style.padding = CONFIG.settingsPanelPadY + "px " + CONFIG.settingsPanelPadX + "px";
+  S.confirmPanelDom.style.borderRadius = CONFIG.settingsPanelRadius + "px";
+  S.confirmPanelDom.style.background = COLOR.tipFill;      // 与另外三个弹窗同色：都是浮在网格上的浅蓝底板
+  S.confirmPanelDom.style.borderColor = COLOR.tipBorder;   // 与面板、视口边框同色，整页仍是同一套外框
+  S.confirmPanelDom.style.color = COLOR.tipDesc;
+  S.confirmPanelDom.style.fontSize = CONFIG.settingsPanelFontSize + "px";
+  S.confirmTextDom.style.color = COLOR.tipName;            // 问话用深一档的蓝，比次要说明更显眼
+  S.btnConfirmOkDom.addEventListener("click", function () { settleConfirm(true); });
+  S.btnConfirmCancelDom.addEventListener("click", function () { settleConfirm(false); });
   // 按下按钮时不让它抢走焦点：与另外三个弹窗同一套处理，键盘要始终留给画布
-  confirmPanelDom.addEventListener("mousedown", function (e) {
+  S.confirmPanelDom.addEventListener("mousedown", function (e) {
     if (e.target.classList.contains("btn")) e.preventDefault();
   });
 }
@@ -403,7 +403,7 @@ function initConfirmPanelDom() {
 // __rbPress(i)：手动播一次右侧工具栏第 i 格的按下反馈，不必按 Shift
 // 用来确认键盘这条路径的收缩动画是否真的在跑；返回 false 表示没有这一格
 window.__rbPress = function (i) {
-  const box = rightBarToolsDom.children[i | 0];
+  const box = S.rightBarToolsDom.children[i | 0];
   if (!box) return false;
   pressRightBarBox(box);
   return true;
@@ -411,7 +411,7 @@ window.__rbPress = function (i) {
 
 // __rbProbe()：读回每格此刻的 transform，0.93 表示正处于键盘反馈中、none 表示已回弹
 window.__rbProbe = function () {
-  return Array.prototype.map.call(rightBarToolsDom.children, function (b) {
+  return Array.prototype.map.call(S.rightBarToolsDom.children, function (b) {
     return getComputedStyle(b).transform;
   });
 };
