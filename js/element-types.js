@@ -128,37 +128,52 @@ function elementPathD(typeId) {
 
 // 把类型点列描成 Canvas 路径；调用前坐标系必须已经平移到元件中心并按需缩放好
 // 气泡分支与 SVG 侧取同一组几何数，描出的外轮廓完全一致，两边不会各自漂移
-function traceElementPath(typeId) {
+function traceElementPath(typeId, target) {
   const t = ELEMENT_TYPES[typeId];
-  ctx.beginPath();
+  const c = target || ctx;   // 目标可以是当前画布上下文，也可以是 Path2D：两者都有下面这几个路径方法
+  if (target === undefined) c.beginPath();   // Path2D 本身就是一条新路径，不需要清空
   if (t.bubble) {
     const g = bubbleGeometry(typeId);
     // Canvas 的角度从 +x 轴起、顺时针增大；交点落在「正下方」偏 φ 处，所以起点取 π/2+φ
     const start = Math.PI / 2 + g.phi;
-    ctx.moveTo(-g.dx, g.yBase);
-    ctx.lineTo(-g.half, g.yApex + g.drop);
-    ctx.arc(0, g.yApex, g.r, start, start + (Math.PI * 2 - g.phi * 2), false);
-    ctx.lineTo(g.dx, g.yBase);
-    ctx.closePath();
+    c.moveTo(-g.dx, g.yBase);
+    c.lineTo(-g.half, g.yApex + g.drop);
+    c.arc(0, g.yApex, g.r, start, start + (Math.PI * 2 - g.phi * 2), false);
+    c.lineTo(g.dx, g.yBase);
+    c.closePath();
     return;
   }
   if (t.roundRect) {
     // 圆角正方形交给标准的 roundRect：x/y 取左上角，宽高是边长的两倍，第 5 个参数直接给圆角半径
     const h = t.roundRect.half;
-    ctx.roundRect(-h, -h, h * 2, h * 2, t.roundRect.r);
+    c.roundRect(-h, -h, h * 2, h * 2, t.roundRect.r);
     return;
   }
   const pts = t.points;
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.closePath();
+  c.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
+  c.closePath();
+}
+
+// 取一种元件类型的轮廓对象：形状只由类型决定，与位置、朝向、缩放无关，所以每种类型只建一次
+// 绘制时只换坐标系再 stroke/fill 同一个对象，逐帧重建路径（moveTo/lineTo/arc）的开销就此消失
+function elementPathObject(typeId) {
+  let p = elementPathCache.get(typeId);
+  if (p === undefined) {
+    p = new Path2D();
+    traceElementPath(typeId, p);
+    elementPathCache.set(typeId, p);
+  }
+  return p;
 }
 
 // 当前选中的元件类型：虚影形状与放置出的元件都取它，切换选择时只改 slotSelectedIndex 这一处
 // 槽序号与类型下标差一个基准，减掉它才是类型下标
-// 选中槽不是元件槽，没有对应类型，返回 null：调用方据此知道「手上没拿元件」
+// 选中槽与文本槽都不是元件槽，没有对应类型，返回 null：调用方据此知道「手上没拿元件」
+// 返回 null 会一并让虚影收起来、左键放置元件那条路直接不响应，两条都由同一个判据分出去
 function selectedTypeId() {
   if (slotSelectedIndex === SELECT_SLOT_INDEX) return null;
+  if (slotSelectedIndex === TEXT_SLOT_INDEX) return null;
   return PANEL_SLOT_TYPES[slotSelectedIndex - ELEMENT_SLOT_BASE];
 }
 

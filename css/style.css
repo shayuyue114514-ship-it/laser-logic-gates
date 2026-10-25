@@ -1,4 +1,26 @@
+/* 自带字体 MiSans：只登记页面真正用到的那几档，字体文件在同目录的 fonts/ 里，逐档挂到同一个家族上，由 font-weight 选档
+   路径是相对本文件写的：字体就放在 style.css 旁边，所以只写 fonts/ 一层，不必回到上一层去
+   文件内部记的 usWeightClass 是 MiSans 自己的非常规刻度（Regular 记的是 330、Bold 记的是 630），
+   直接照抄会让 CSS 里的 400 / 700 对不上档位，所以一律改按通用的 web 刻度声明
+   font-display 取 swap：字体还没到时先用回退字体把字显示出来，不让整页文字空着等
+   形态说明：这里引用的是 woff2 子集字体，不是官方原始的 otf。
+   原始 otf 每档带约 2.9 万个字形、单个 6.3 MB，而本页文案去重后只有一千多字，
+   保留全字符集纯属白白拖慢加载；tools/build-fonts.py 会扫描源码取出用到的字符，
+   只留这些字形并压成 woff2，两档合计约 0.33 MB（原为 25.6 MB）。
+   要点：改动页面文案后，重新运行一次 python3 tools/build-fonts.py，否则新字可能不在字体里
+   （真缺字也不会显示成方框，会回退到下面 font-family 里排的系统中文字体）
+   只用这两档是因为它们就是全站用到的全部：400 正文与各类次要文字、700 标题与各处强调
+   原来另挂 500 与 600 两档，全站只用了几处；为把上传体积压下来已合并进上面两档：
+   首页入口文字由 500 归到 400，教程正文的小标题与按钮文字由 600 归到 700
+   （另有 100/200/300/350/500/600/650/900 八档从未被任何样式或画布文字取用，已一并去掉）
+   MiSans 版权归小米科技有限责任公司所有，按《MiSans 字体知识产权许可协议》免费使用，
+   这里只是在官方发布的字形基础上抽取子集，字形本身未作任何改动 */
+@font-face { font-family: "MiSans"; src: url("fonts/MiSans-Regular.woff2") format("woff2");    font-weight: 400; font-display: swap; }
+@font-face { font-family: "MiSans"; src: url("fonts/MiSans-Bold.woff2") format("woff2");       font-weight: 700; font-display: swap; }
+
 /* 页面白底、无滚动条：网格只出现在视口矩形内，视口外保持白底 */
+/* 整页统一用自带的 MiSans，字重由各处的 font-weight 选档；后面几项是字体尚未到位时的回退，
+   按系统上观感最接近 MiSans 的中文字体依次排，缺了自带的字体文件也不会变成衬线体 */
 html, body {
   margin: 0;
   padding: 0;
@@ -6,8 +28,13 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: #ffffff;
-  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "MiSans", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+
+/* 进屋前那一屏（遮挡层 #bootScreen）的样式不在这里，内联在 index.html 与 editor.html 的 head 里 */
+/* 原因是先后次序：整站样式表是异步取回来的，而那一屏要在它之前就画出来，
+   所以它的样式必须跟着页面本体一起到手，不能等这份文件
+   它的外观也就只有那一个出处：要改去两个页面的 head 里改，两处逐字相同 */
 /* 工作区竖栏：贴在窗口最左侧的一条，左、上、下都内缩一个间隙，与上方面板、底栏同处一个框内
    宽度、三边位置与配色都由脚本从 CONFIG / COLOR 注入，这里只管定位与层级
    四条边都描边：只有右边一条时，竖栏的顶与底看不出到哪里为止
@@ -17,6 +44,99 @@ html, body {
   box-sizing: border-box;
   z-index: 2;
   border: 2px solid;
+}
+/* 右侧工具栏：与左侧竖栏同一套定位与外观（同底色、同描边、同间隙），只是窄得多
+   宽度由脚本从配置注入；放的东西是纵向一列小功能图标，多了整栏自己滚动 */
+#rightBar {
+  position: fixed;
+  box-sizing: border-box;
+  z-index: 2;
+  border: 2px solid;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;      /* 这么窄的栏里，滚动条会占掉一半宽度，隐藏它，靠滚轮滚动 */
+}
+#rightBar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+/* 功能图标列：纵向排、撑满栏内宽度，格子之间以及格子与栏壁之间都留一道缝
+   栏宽固定 40 不变：要让格子更大、缝更宽，只能把四周的内缩收到最小，格子因此从 28 长到 32 */
+#rightBarTools {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 2px 2px;   /* 上方多留一点：第一格不要贴在栏顶边上，看起来才不像被切掉了一截 */
+}
+/* 工具栏里的一个方框：宽度撑满栏内，高度与宽度相等，圆角只给一点点
+   描边取 2px，与上方元件槽同一档；1px 在这么小的格子上显得发虚，加粗一档才立得住
+   填充与描边取自栏上挂的几个颜色变量，脚本按元件槽那一套配色注入，改动只需换变量 */
+.rb-tool {
+  box-sizing: border-box;
+  display: flex;             /* 图标在格子里居中 */
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;   /* 正方形：栏有多宽，格子就有多高 */
+  border: 2px solid var(--rb-border);
+  border-radius: 6px;
+  background: var(--rb-fill);
+  cursor: pointer;
+  user-select: none;     /* 连点几下不该顺手选中的文字 */
+  -webkit-tap-highlight-color: transparent;  /* 触屏按下时浏览器会给一下默认高亮，与自绘的按下反馈重复 */
+  outline: none;         /* 点中之后不留下焦点框，格子里只有图标与描边，多余的一圈会显脏 */
+  /* 缩放按元件槽那一档走 0.16 秒；颜色单独放快 0.05 秒：选中与取消选中要一眼就看到，不拖尾 */
+  transition: transform 0.16s ease-out, background-color 0.05s ease-out, border-color 0.05s ease-out;
+}
+/* 工具栏的悬停名称：贴在所悬停格子的左侧，右边缘与格子左边缘留一道缝
+   配色与列表里的全名小窗同一套：淡蓝底、深蓝字，不描边，轻飘飘地浮在网格上 */
+#rightBarTip {
+  display: none;
+  position: fixed;
+  z-index: 5;               /* 与其它悬停小窗同一档：压在栏与各面板之上，仍在弹窗之下 */
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #C4EBFF;
+  color: #0D47A1;
+  font-size: 12px;
+  line-height: 17px;
+  white-space: nowrap;      /* 名称都很短，一律单行，不折行也不撑宽 */
+  pointer-events: none;     /* 指针从小窗上穿过去，不会因为它挡住而反复触发进出 */
+  user-select: none;
+}
+/* 格子里的图标：尺寸定死，具体图形由脚本按 SVG 建出来
+   两个状态图标叠在同一格里，靠父格子的 paused 类决定露哪一个，位置因此永远对齐 */
+.rb-ico {
+  display: block;
+  width: 21px;
+  height: 21px;
+  pointer-events: none;      /* 点在图标上也等于点在格子上 */
+}
+.rb-ico-pause {
+  display: none;
+}
+.rb-state.paused .rb-ico-play {
+  display: none;
+}
+.rb-state.paused .rb-ico-pause {
+  display: block;
+}
+/* 悬停与按下：与元件槽取同一档（0.93 / 0.86），只缩放不变色，按下不闪 */
+.rb-tool:hover {
+  transform: scale(0.93);
+}
+.rb-tool:active {
+  transform: scale(0.86);
+}
+/* 键盘触发时的反馈：只缩到悬停那一档，比按住更轻，松开后的回弹走上面那条 0.16 秒过渡 */
+.rb-tool.press {
+  transform: scale(0.93);
+}
+/* 选中：颜色变化沿用元件槽那一套（填充与描边一起提亮），缩放不变 */
+.rb-tool.on {
+  background: var(--rb-fill-on);
+  border-color: var(--rb-border-on);
 }
 /* 竖栏里的存档列表：整栏只放这一棵树，行高、缩进、图标一律定死，条目多了由它自己滚动 */
 #sidebarTree {
@@ -63,6 +183,17 @@ html, body {
 }
 .sb-pick:hover { background: #D8F3FF; }   /* 悬停略亮一档：与列表里那种淡白高亮区分开，它是按钮不是行 */
 .sb-pick:active { background: #ADDCF5; }  /* 按下压深一档，手感像真的按进去 */
+/* 「打开文件」按钮：外观全部沿用上面那一条，只多出与它之间的间距 */
+/* 两者不是同一条流程的先后两步，而是并列的两件事，所以中间空出一行的距离，不贴着排 */
+.sb-open-file {
+  margin-top: 8px;
+}
+/* 「继续打开」按钮：外观同「选择文件夹」，只多出与它之间的间距
+   两者也是并列的两条路：一条是接着上次那个工作区，一条是另选一个，中间空出一行更分得开
+   它有工作区之后就没了，所以只在空状态里出现，不必管列表状态下的排法 */
+.sb-resume {
+  margin-bottom: 8px;
+}
 
 /* 列表里悬停时的小窗：写这一条的全名 */
 /* 用 fixed 定位在窗口坐标上：位置只跟指针走，不随列表滚动，也不会被列表那个滚动容器裁掉 */
@@ -82,6 +213,102 @@ html, body {
   pointer-events: none;     /* 指针从小窗上穿过去：它不会变成悬停目标，也就不会把自己关掉 */
   user-select: none;
 }
+
+/* ---------- 工作区右键菜单 ---------- */
+/* 贴在指针旁边的一块小白板，里面只有「新建文件夹」与「新建文件」两条
+   列表里每一行都是淡底，菜单要压在那上面还得看得清，所以这里取纯白底配一条淡蓝描边；
+   项目里其它浮层（悬停小窗、简介浮层）都靠底色自己立住、不描边，但那些是纯色浅底，
+   这一块是压在各行之上的实心白板，破例给一层很淡的投影把它从底下那些行上托起来 */
+/* 菜单里「新建文件」右侧引出的那一列文件类型，与菜单是同一块白板、同一套条目样式：
+   两块浮层并排出现，长两副样子会很显眼；它是一条单独的固定层，位置由 sidebar.js 按条目算 */
+#sidebarMenu,
+#sidebarSubmenu {
+  display: none;
+  position: fixed;
+  box-sizing: border-box;
+  z-index: 6;               /* 压在竖栏（2）、简介浮层（5）与各面板（4）之上 */
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid rgba(13, 71, 161, 0.18);
+  border-radius: 8px;
+  background: #FFFFFF;
+  box-shadow: 0 6px 18px rgba(13, 71, 161, 0.14);
+  user-select: none;
+}
+/* 一条菜单项：图标与文字横向排开，整条都是可点区域 */
+/* 用 button 而不是 div：键盘能 Tab 过来、回车空格能触发，读屏软件也念得出名字，这些都不必自己实现 */
+.sb-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px 6px 4px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: #123B54;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+/* 悬停与键盘聚焦给同一层浅蓝：鼠标与键盘两条路看到的反馈完全一致 */
+/* 描边一律去掉，聚焦改用底色表示，与菜单里没有边框的整体观感一致 */
+.sb-menu-item:hover,
+.sb-menu-item:focus-visible {
+  background: #D8F3FF;
+  color: #0D47A1;
+  outline: none;
+}
+/* 按下压深一档：与竖栏里那两个按钮、弹窗里那几个按钮是同一套手感 */
+.sb-menu-item:active { background: #ADDCF5; }
+/* 藏起来的那一条不占位置、也不参与布局：右键落在文件行上时才把它放出来 */
+.sb-menu-item.is-off { display: none; }
+/* 「删除」这一条平时与另外两条一个样子，指针压上去才转成砖红
+   菜单整体保持安静，真要去点它的时候才提示这一下是破坏性的；点下去还有一次确认框兜着 */
+/* 选择器多带一个属性，权重比上面那条通用的悬停高，所以写在前面也能盖过它 */
+.sb-menu-item[data-kind="delete"]:hover,
+.sb-menu-item[data-kind="delete"]:focus-visible {
+  background: rgba(192, 57, 43, 0.10);
+  color: #C0392B;
+}
+.sb-menu-item[data-kind="delete"]:active { background: rgba(192, 57, 43, 0.18); }
+/* 菜单里的图标沿用列表那两个类，尺寸、间距与配色一并复用，菜单与列表不会各长一副样子 */
+.sb-menu-item .sb-icon { margin: 0 6px 0 4px; }
+/* 垃圾桶不设自己的颜色，跟着那一条的文字色走，悬停时与文字一起转成砖红 */
+
+/* ---------- 新建时就地那一行 ---------- */
+/* 外形照列表里的行来，只把名字那一段换成一个输入框，落点在哪一层一眼看得出 */
+.sb-new-row { cursor: default; }
+.sb-new-row:hover { background: rgba(255, 255, 255, 0.45); }   /* 与普通行同样的悬停底色，它仍是在这一层里 */
+.sb-new-input {
+  flex: 1;
+  min-width: 0;
+  height: 19px;
+  padding: 0 3px;
+  border: 1px solid #1565C0;
+  border-radius: 4px;
+  background: #FFFFFF;
+  color: #0D47A1;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+/* 聚焦时外面再套一圈淡蓝：光标本来就在框里，这一圈只是把「正在这里定名字」说清楚 */
+.sb-new-input:focus { box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.18); }
+/* 新建那一行里的出错提示：贴着输入框右侧的一行小字，只写最短的原因，详细原因在控制台 */
+/* 砖红是整站唯一的红，专表示「这个名字现在过不去」，不会和别处的蓝混起来 */
+.sb-new-hint {
+  flex: none;
+  margin-left: 5px;
+  color: #C0392B;
+  font-size: 11px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+.sb-new-row.is-error .sb-new-input { border-color: #C0392B; }
+.sb-new-row.is-error .sb-new-input:focus { box-shadow: 0 0 0 2px rgba(192, 57, 43, 0.16); }
+
 /* 根目录名：独占一行，比下面的条目重一档，底下一条淡淡的线把名字和列表分开 */
 /* 左内边距取 10：加上文件夹图标正好比下面第一级条目的图标左移一个缩进格，读起来它就是这些条目的上级 */
 /* 整行可点：点它是换一个文件夹，所以给出手型光标和一层悬停底色，让人知道这里能点 */
@@ -188,6 +415,14 @@ html, body {
   /* 画布本身不可聚焦，加 tabindex 后可以主动抢键盘焦点；全屏画布不需要焦点框 */
   outline: none;
 }
+/* 首页画布：整屏一张，铺满窗口；位图尺寸与 CSS 尺寸都由 home.js 按窗口和 devicePixelRatio 设定
+   与编辑器画布取同一套观感与约束：关掉浏览器自带手势、关掉文字选中、去掉焦点框 */
+#homeCanvas {
+  display: block;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
 /* 元件层：盖在画布上方的 SVG，本步不做交互，指针事件全部透传给画布 */
 #elemLayer {
   position: fixed;
@@ -208,7 +443,7 @@ html, body {
   z-index: 5;
 }
 #slotTipName {
-  font-weight: 600;
+  font-weight: 700;
 }
 /* 弹出面板的通用外观：设置弹窗与文件弹窗共用这一类，两者的底板、行布局、控件样式完全一致
    这里只管定位与层级，字号、内边距、圆角、颜色由 JS 从 CONFIG / COLOR 一次性注入
@@ -262,11 +497,21 @@ html, body {
   flex: none;
   white-space: nowrap;
 }
+/* 专栏标题：上方一条细线把这一组控件与上面的内容隔开，字用深一档的蓝，只作分组用不参与交互 */
+.popup .sec {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(41, 182, 246, 0.5);
+  color: #0D47A1;
+  font-weight: 700;
+  white-space: nowrap;
+}
 /* 速度滑块：轨道与滑块交给浏览器原生渲染，只用 accent-color 把它染成同一个蓝 */
 /* 宽度写死并禁止收缩，否则会被左边的文字挤变形，与开关同样对待 */
+/* 取 92 而不是更宽：设置弹窗里最长的一行是「缩放刷新速度」六个字，加上滑块与读数正好放得下，不换行也不溢出 */
 .popup input[type="range"] {
   flex: none;
-  width: 110px;
+  width: 92px;
   accent-color: #29B6F6;
 }
 /* 速度数值：做成小徽章，白底圆角、数字等宽居中，读数清楚又不像裸露的文本 */
@@ -385,10 +630,80 @@ html, body {
 .popup .btn.primary {
   background: #C4EBFF;
   color: #0D47A1;
-  font-weight: 600;
+  font-weight: 700;
 }
 .popup .btn.primary:hover { background: #D8F3FF; }
 .popup .btn.primary:active { background: #ADDCF5; }
+/* 标签输入框：与确认弹窗同一套底板与按钮排布，只是中间换成一行可以打字的输入框 */
+/* 它排在确认弹窗之上：确认弹窗是流程自问自答，而这个是用户双击直接叫起来的，叫起来就该在最前面 */
+.popup.modal.labeledit {
+  z-index: 8;
+  max-width: 92vw;   /* 多行那一支的框比较宽，窄窗口时收住，不横向溢出屏幕 */
+}
+/* 提示那一行：不参与滚动，只占一行高，下面留出与输入框的间距 */
+.popup.modal.labeledit .msg {
+  flex: none;
+  margin: 2px 0 10px;
+  line-height: 1.5;
+}
+/* 输入框：整行铺开，白底略透明 */
+/* 不给它铺纯白底：本项目里白色代表「选中」，这里靠浅底加描边来表示「正在这里打字」 */
+.popup.modal.labeledit .edit {
+  box-sizing: border-box;
+  flex: none;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #29B6F6;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;              /* 去掉浏览器默认的焦点圈，改由描边变深来表示焦点 */
+}
+.popup.modal.labeledit .edit:focus {
+  border-color: #1565C0;
+}
+/* 浮动文本的原地输入框：绝对定位铺在那块文字所在的屏幕上，尺寸与字号每帧由脚本按排版结果同步 */
+/* 文字透明：字形由画布按染色规则画在它下面，这里只负责收键盘、放光标、托住选中底色 */
+/* 不画边框，连虚线也不要：边框的四条边在这个尺度上会被读成压在字上或字下的横线，很难看 */
+/* 「正在这里编辑」这个意思改由画布画一块淡蓝底色来表示，见 texts.js 的 drawTextEditBox */
+#textField {
+  display: none;
+  position: fixed;
+  z-index: 5;                     /* 压在画布与面板之上，但要留在三个弹窗之下 */
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;                  /* 连浏览器默认的焦点圈也一并去掉，免得聚焦时又冒出一条线 */
+  background: transparent;
+  color: transparent;             /* 自己的字不画，交给画布画 */
+  caret-color: transparent;       /* 原生光标同样藏起来，改由脚本画，才能跟着逐行不同的字号落位 */
+  font-family: inherit;
+  white-space: pre;               /* 与画布一致：不自动折行，一行就是一行 */
+  overflow: hidden;               /* 高度已按整块文字算足，不出现滚动条 */
+  resize: none;
+}
+/* 选中底色：文字是透明的，但选中块照常画出来，正好露出一段高亮 */
+#textField::selection {
+  background: rgba(41, 182, 246, 0.35);
+}
+/* 按钮行：与确认弹窗同一套排布，靠右、各按文字宽窄收住 */
+.popup.modal.labeledit .acts {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  height: auto;
+}
+.popup.modal.labeledit .acts .btn {
+  justify-content: center;
+  width: auto;
+  flex: none;
+  height: 28px;
+  padding: 0 16px;
+}
 /* 调试面板：默认隐藏，用 debugPanel.show() 唤出；浮在网格之上，方便随时调参 */
 /* 钉在左下角而不是左上角：左上角是元件选择面板的位置，钉在那里会把选项槽全挡住 */
 #debugPanel {
@@ -429,14 +744,16 @@ html, body {
 #debugPanel input[type="range"] {
   width: 84px;
 }
+/* 色值读数：整页只有这两处用过等宽字体，现在改回页面同族的 MiSans 并打开等宽数字特性，
+   位数变化时数字不会左右晃——原来换字体要的就是这件事，MiSans 自带 tnum 就能做到，不必再借系统等宽字体 */
 #debugPanel .code {
-  font-family: Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
   color: #444444;
 }
-/* 性能读数：数值用等宽字体并定一个最小宽度，位数变化时它右边的标签不会跟着左右晃 */
+/* 性能读数：数值开等宽数字并定一个最小宽度，位数变化时它右边的标签不会跟着左右晃 */
 #debugPanel .perfRow .val {
   min-width: 44px;
-  font-family: Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
   color: #0D47A1;
 }
 /* 读数区与下面的取色滑块之间画一条分隔线，一眼能看出上面那块是只读的监测区 */

@@ -31,6 +31,39 @@ function updateSpeedValueLabel() {
   speedValueDom.textContent = microDt <= 0 ? "极速" : microDt.toFixed(2) + "s";
 }
 
+// 拖动「渲染精度」滑块：精度除以 5 得到画布像素比上限，并把所有按像素比画出来的东西整体作废
+// 画布位图、网格瓷砖、灯光晕纹理、元件贴图、元件缓存位图都是按像素比栅格化的，换了精度必须整体重来一遍
+function onRenderPrecisionInput() {
+  renderPrecision = Number(renderPrecisionSliderDom.value);
+  renderScaleCap = renderPrecision / CONFIG.renderPrecisionPerX;   // 5→1×、10→2×、20→4×
+  resizeCanvas();            // 画布位图尺寸与绘制坐标变换都按新像素比重设
+  gridTileKey = "";          // 瓷砖随像素比栅格化，清掉指纹就等于要求重画
+  lampGlowCacheKey = "";     // 灯光晕纹理同理
+  elemSpriteMap.clear();     // 元件贴图是按像素比栅格化的，旧的一律作废
+  invalidateElementCache();  // 元件缓存位图也是按像素比开的，标脏让它下一帧重建
+  sceneDirty = true;
+  updateRenderPrecisionLabel();
+}
+
+// 更新渲染精度读数：直接写滑块上的数，10 就是 2 倍像素比，20 就是 4 倍
+// 这样读数与滑块刻度是同一个量，拖动时不会出现「数字变了但看不出在调什么」的断层
+function updateRenderPrecisionLabel() {
+  renderPrecisionValueDom.textContent = renderPrecision.toFixed(1);
+}
+
+// 拖动「缩放刷新速度」滑块：只改放大重画的阈值，不必作废任何已有缓存，标记重绘即可
+// 阈值越小，缩放途中越频繁地重画缓存位图，画面越清晰也越费；相机停稳时总是重画，不受这条限制
+function onZoomRefreshInput() {
+  zoomRefreshLimit = Number(zoomRefreshSliderDom.value);
+  updateZoomRefreshLabel();
+  sceneDirty = true;
+}
+
+// 更新缩放刷新速度读数：带乘号、固定两位小数，1.40× 表示位图放到 1.4 倍时重画
+function updateZoomRefreshLabel() {
+  zoomRefreshValueDom.textContent = zoomRefreshLimit.toFixed(2) + "×";
+}
+
 // 翻转一个开关的外观，返回翻转后的状态：两个开关共用，开与关的样子只维护这一份
 function flipSwitch(el) {
   const on = !el.classList.contains("on");

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 标题显示在浏览器标签和搜索结果的大字上；简介显示在搜索结果标题下方那两行 -->
+<title>激光门 - 用光路搭出逻辑门</title>
+<meta name="description" content="使用激光门造就奇迹。用不同的元件做出电路，让激光沿网格逐格传播，把与门、或门、非门亲手搭出来，看光是怎么把它们算出来的。">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<!-- 进屋前那一屏的样式：内联在这里，为的是让首次绘制不必等任何外部文件 -->
+<!-- 整站样式表改成了下面那一行异步取，页面因此一被解析完就能把欢迎界面画出来，
+     真正的界面在它后面慢慢到，到齐之前一直由遮挡层盖着（何时收掉见 js/boot.js）
+     这一整段在两个页面里逐字相同，改一处要两处一起改 -->
+<style>
+  /* 兜底：样式表还没到的那一小段里，页面上的元素都还没有样式，内容可能比窗口高
+     先把外边距与滚动条按掉，免得滚动条在欢迎界面旁边露出来 */
+  html, body {
+    margin: 0;
+    overflow: hidden;
+    background: #ffffff;
+  }
+  /* 遮挡层：铺满整屏，正中是项目名与一条来回走的进度条 */
+  #bootScreen {
+    position: fixed;
+    inset: 0;               /* 四条边贴住窗口：不写宽高，窗口怎么变它都正好铺满 */
+    z-index: 20;            /* 压在画布、元件层、竖栏与所有弹窗（弹窗从 4 起）之上 */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;    /* 与页面同色：淡出时看不出接缝，只像内容自己浮上来 */
+    color: #0D47A1;         /* 与首页标题、弹窗标题同一档深蓝 */
+    font-family: "MiSans", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  /* 收掉时的淡出：类名由 boot.js 加，0.22 秒后整块从页面里摘掉 */
+  #bootScreen.is-gone {
+    opacity: 0;
+    pointer-events: none;   /* 淡出过程中不再接收点击，免得挡住底下刚露出来的按钮 */
+    transition: opacity 0.22s ease-out;
+  }
+  /* 项目名：与首页大标题写的是同一串字，这里取小一些的字号，靠字重与深蓝字色立住 */
+  #bootScreen .boot-title {
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  /* 进度条：一条浅蓝底槽，里面一小段深蓝来回走 */
+  /* 它表示的不是真实进度：浏览器不提供字体下载的进度，这一段的用处只是给出「正在进」这个信号 */
+  #bootScreen .boot-track {
+    position: relative;
+    overflow: hidden;       /* 走到底与刚起头时那一小段要贴边裁掉，不能露出槽外 */
+    width: 120px;
+    height: 3px;
+    margin-top: 18px;
+    border-radius: 2px;
+    background: #C4EBFF;
+  }
+  #bootScreen .boot-track i {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 40px;
+    height: 100%;
+    border-radius: 2px;
+    background: #1565C0;
+    animation: bootSlide 1.1s ease-in-out infinite;
+  }
+  @keyframes bootSlide {
+    from { transform: translateX(-40px); }
+    to   { transform: translateX(120px); }
+  }
+  /* 系统里开了「减少动态效果」时不来回走：那一小段停在正中，位置本身也说得清页面正在进 */
+  @media (prefers-reduced-motion: reduce) {
+    #bootScreen .boot-track i {
+      animation: none;
+      left: 40px;
+    }
+  }
+</style>
+<!-- 整站样式表：media 先写 print，浏览器就不会为它停下首次绘制；文件一到手，onload 把它改回 all
+     这是本项目里唯一一处内联事件：只有挂在元素自己身上，才能在文件到手的那一刻就改过来
+     脚本被禁时 onload 不会跑，由下面那句 noscript 里的同款 link 兜住
+     id 留给 js/boot.js 认：它靠 link.sheet 判断这份样式表到位没有，没到位就先不揭开遮挡层 -->
+<link id="mainStyle" rel="stylesheet" href="css/style.css" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="css/style.css"></noscript>
+</head>
+<body>
+
+<!-- 进屋前的遮挡层：页面一被解析到它就先画出来，等首帧、字体、样式表都齐了再淡出收掉，何时收由 js/boot.js 决定
+     没有它的时候，首帧之前那一瞬看到的是还没成形的页面：整屏白，左上角留着一个只有描边、
+     里面空空的小方框，那是竖栏还没被脚本摆好之前的样子；这一块把它整个盖住
+     它的外观写在 head 里那段内联样式里，底色与页面同为白，所以淡出时看不出接缝，只像内容自己浮上来
+     它必须放在 body 的最前面：越早解析到，越早能盖住底下那些还没成形的元素 -->
+<div id="bootScreen">
+  <div class="boot-title">激光门</div>
+  <div class="boot-track"><i></i></div>
+</div>
+
+<!-- 工作区竖栏：贴在窗口最左侧的一条，左、上、下都内缩一个间隙，与上方面板、底栏同处一个框内
+     宽度与配色由脚本从 CONFIG / COLOR 注入；栏里是存档列表，点最上面的文件夹名可以换一个文件夹
+     它的出现让上方那条面板与网格视口都不再横跨整行 -->
+<div id="sidebar">
+  <!-- 存档列表容器：行由脚本按所选文件夹里的真实条目生成，见 js/sidebar.js -->
+  <div id="sidebarTree"></div>
+</div>
+
+<!-- 右侧工具栏：与左侧竖栏同一套定位与外观，但做得很窄，专放大量小功能图标
+     上下同样各内缩一个间隙，右边缘贴窗口右侧；它的出现让网格视口、上方面板与底栏都不再顶到窗口右边 -->
+<div id="rightBar">
+  <div id="rightBarTools"></div>
+</div>
+
+<!-- 工具栏的悬停名称：指针停在某一格上时，在这一格的左侧写出它是什么
+     单独一层而不是格子里的子节点：它要探到栏外面去，挂在可滚动的栏里会被裁掉 -->
+<div id="rightBarTip"></div>
+
+<canvas id="gridCanvas" tabindex="0"></canvas>
+<svg id="elemLayer"></svg>
+
+<!-- 简介浮层：排在元件层之后，配合 z-index 保证它永远画在元件之上 -->
+<div id="slotTip">
+  <div id="slotTipName"></div>
+  <div id="slotTipDesc"></div>
+</div>
+
+<!-- 列表里悬停时的小窗：写那一条的全名，位置跟着指针走
+     它必须放在竖栏外面：竖栏里的列表是可滚动的，挂在里面会被滚动容器裁掉 -->
+<div id="sidebarTip"></div>
+
+<!-- 工作区右键菜单：在列表上点右键时贴着指针弹出，里面只有新建文件夹与新建文件两条
+     两条的图标与文字由 sidebar.js 生成，图形与列表里那一族同源，所以菜单说的是和列表同一套话
+     位置按指针摆，贴到窗口右边或下边时自动翻到另一侧，见 sidebar.js 的 placeSidebarMenu -->
+<div id="sidebarMenu"></div>
+
+<!-- 右键菜单里「新建文件」右侧引出的子列表：里面是能存成的文件类型，目前只有 .lccas 一条
+     单独一层而不是菜单的子节点：菜单只有几个字的宽度，这一列要从它右边探出去
+     位置按「新建文件」那一条算，贴到窗口右边时翻到菜单左侧，见 sidebar.js 的 showSidebarSubmenu -->
+<div id="sidebarSubmenu"></div>
+
+<!-- 设置弹窗：排在简介浮层之后，齿轮点亮时显示在齿轮正下方；开关初始带 on 类，与默认开启的状态一致 -->
+<div id="settingsPanel" class="popup">
+  <div class="row">
+    <span class="lbl">运行速度</span>
+    <input type="range" id="speedSlider">
+    <span class="val" id="speedValue"></span>
+  </div>
+  <div class="sec">渲染</div>
+  <div class="row">
+    <span class="lbl">渲染网格</span>
+    <span class="sw on" id="gridSwitch"><span class="knob"></span></span>
+  </div>
+  <div class="row">
+    <span class="lbl">高级渲染</span>
+    <span class="sw on" id="advSwitch"><span class="knob"></span></span>
+  </div>
+  <div class="row">
+    <span class="lbl">渲染精度</span>
+    <input type="range" id="renderPrecisionSlider">
+    <span class="val" id="renderPrecisionValue"></span>
+  </div>
+  <div class="row">
+    <span class="lbl">缩放刷新速度</span>
+    <input type="range" id="zoomRefreshSlider">
+    <span class="val" id="zoomRefreshValue"></span>
+  </div>
+</div>
+
+<!-- 文件弹窗：文件按钮点亮时显示在该按钮正下方，与设置弹窗同款底板 -->
+<!-- 文件名一行，几个动作各占一行 -->
+<div id="filePanel" class="popup">
+  <div class="row">
+    <span class="lbl">当前文件</span>
+    <span class="fname" id="fileName"></span>
+  </div>
+  <button class="btn" id="btnOpen">打开</button>
+  <button class="btn" id="btnSave">保存</button>
+  <button class="btn" id="btnSaveAs">另存为</button>
+  <button class="btn" id="btnImportSel">以选区导入</button>
+  <button class="btn" id="btnExportSel">以选区导出</button>
+  <button class="btn" id="btnCopyAi">复制给 AI</button>
+</div>
+
+<!-- 教程弹窗：点教程按钮后从屏幕正中弹出，底板与设置、文件两个弹窗同一套配色 -->
+<!-- 左上角是一个叉形的关闭按钮，点了就把窗口关掉；下面的内容区先留空，等教程文字写好之后再填进去 -->
+<div id="tutorialPanel" class="popup modal">
+  <button class="btn icon" id="btnTutorialCancel" aria-label="取消">
+    <!-- 叉用两笔圆头描边画成，收笔是圆的，与画布上齿轮、文件、教程三个图标的收笔同一套 -->
+    <!-- 描边取 currentColor：颜色跟着按钮文字色走，以后改按钮色不必再改这里 -->
+    <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" focusable="false">
+      <path d="M5.5 5.5 L12.5 12.5 M12.5 5.5 L5.5 12.5"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+    </svg>
+  </button>
+  <div class="doc" id="tutorialDoc"></div>
+</div>
+
+<!-- 确认弹窗：只有一句问话和两个按钮，用在「丢掉手上的改动」这类要点头才继续的地方 -->
+<!-- 底板与教程弹窗是同一套（都走 .popup.modal），只是窄得多；问话文字由脚本按场合写进去，这里不写死 -->
+<div id="confirmPanel" class="popup modal confirm">
+  <div class="msg" id="confirmText"></div>
+  <div class="acts">
+    <!-- 左边是退路，右边是那件会丢东西的事：默认视线落在右边，与系统弹窗的习惯一致 -->
+    <button class="btn" id="btnConfirmCancel" type="button">取消</button>
+    <button class="btn primary" id="btnConfirmOk" type="button">丢弃</button>
+  </div>
+</div>
+
+<!-- 标签输入框：双击元件或它的标签时从屏幕正中弹出，用来改那一行文字
+     底板与确认弹窗同一套（都走 .popup.modal），只是中间换成一行可以打字的输入框
+     文字清空再确定就等于删掉标签；Esc 与「取消」都表示放弃这次改动 -->
+<div id="labelEditor" class="popup modal labeledit">
+  <div class="msg" id="labelEditorHint">标签文字（清空即删除）</div>
+  <input class="edit" type="text" id="labelEditorInput" maxlength="40" autocomplete="off" spellcheck="false">
+  <div class="acts">
+    <button class="btn" id="btnLabelCancel" type="button">取消</button>
+    <button class="btn primary" id="btnLabelOk" type="button">确定</button>
+  </div>
+</div>
+
+<!-- 浮动文本的原地输入框：铺在那块文字所在的屏幕上，文字透明、只留光标与选中底色 -->
+<!-- 字形由画布按染色规则画在它下面，所以打字过程中标题的放大与染色是实时可见的 -->
+<!-- 用真的 textarea 而不是自己在画布上模拟一个编辑器：输入法、选中、方向键、鼠标点选全部是浏览器原生行为 -->
+<textarea id="textField" autocomplete="off" spellcheck="false" wrap="off"></textarea>
+
+<div id="debugPanel">
+  <!-- 性能读数：只读，不参与画面。按 P 开关这个面板，F2 同样可用（Mac 上功能键默认要按住 Fn），或在控制台执行 debugPanel.show() -->
+  <!-- 分两行排：第一行的三个都是时间（帧率 帧/秒，帧间隔与脚本耗时都是毫秒），第二行的四个都是规模，混排会读不清 -->
+  <!-- 脚本指每帧 JS 占用的时间，帧间隔指浏览器实际给到的间隔，两者一起看才知道帧率是被脚本拖住还是本来就到顶 -->
+  <div class="grp perfRow">
+    <label>帧率<span class="val" id="perfFps">--</span></label>
+    <label>帧间隔<span class="val" id="perfFrame">--</span></label>
+    <label>脚本<span class="val" id="perfScript">--</span></label>
+  </div>
+  <div class="grp perfRow">
+    <label>元件<span class="val" id="perfTotal">--</span></label>
+    <label>在屏<span class="val" id="perfDrawn">--</span></label>
+    <label>剔除<span class="val" id="perfCulled">--</span></label>
+    <label>缩放<span class="val" id="perfScale">--</span></label>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swFill"></span>
+    <label>填充</label>
+    <label>H<input type="range" id="fillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="fillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="fillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swStroke"></span>
+    <label>描边</label>
+    <label>H<input type="range" id="strokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="strokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="strokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeStroke"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swPanel"></span>
+    <label>底板</label>
+    <label>H<input type="range" id="panelH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="panelS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="panelL" min="0" max="100" step="1"></label>
+    <span class="code" id="codePanel"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSlot"></span>
+    <label>槽填充</label>
+    <label>H<input type="range" id="slotH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="slotS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="slotL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSlot"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swGearFill"></span>
+    <label>齿轮填充</label>
+    <label>H<input type="range" id="gearFillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="gearFillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="gearFillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeGearFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swGearStroke"></span>
+    <label>齿轮描边</label>
+    <label>H<input type="range" id="gearStrokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="gearStrokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="gearStrokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeGearStroke"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSetFill"></span>
+    <label>设置槽填充</label>
+    <label>H<input type="range" id="setFillH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="setFillS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="setFillL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSetFill"></span>
+  </div>
+  <div class="grp">
+    <span class="sw" id="swSetStroke"></span>
+    <label>设置槽描边</label>
+    <label>H<input type="range" id="setStrokeH" min="0" max="360" step="1"></label>
+    <label>S<input type="range" id="setStrokeS" min="0" max="100" step="1"></label>
+    <label>L<input type="range" id="setStrokeL" min="0" max="100" step="1"></label>
+    <span class="code" id="codeSetStroke"></span>
+  </div>
+</div>
+<!-- 加载顺序不可随意调整：util.js 必须排在最前面，因为 config.js 在文件顶层就要用 hslToRgb 算配色端点，
+       state.js 在文件顶层要调用缓动函数，两者都要用到工具函数；把工具函数提到最前，这两处才都不会落空 -->
+<script src="js/util.js"></script>
+<script src="js/config.js"></script>
+<!-- 句柄记忆与存档文件的类型声明：编辑器与首页共用，两页写的是同一个库、同一个键，所以必须排在
+     sidebar.js 与 files.js 之前——那两处都要用 SAVE_EXT 与那几个句柄函数 -->
+<script src="js/handle-store.js"></script>
+<script src="js/element-types.js"></script>
+<script src="js/state.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/render-scene.js"></script>
+<script src="js/render-panel.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/tutorial-content.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/files.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/slots.js"></script>
+<script src="js/elements.js"></script>
+<script src="js/history.js"></script>
+<script src="js/circuit.js"></script>
+<script src="js/labels.js"></script>
+<script src="js/texts.js"></script>
+<script src="js/selection.js"></script>
+<script src="js/ghost.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/input.js"></script>
+<!-- 离线缓存登记：页面打开时静默把整站存进本地，之后断网也能直接打开，不依赖任何其它脚本 -->
+<script src="js/offline.js"></script>
+<!-- 加载界面与字体加载：两个都要排在 main.js 之前，main.js 起步时第一个要用、紧接着第二个也要用
+     boot.js 管遮挡层何时收掉，fonts.js 把自带的 MiSans 点名取回来 ------------------------------- -->
+<script src="js/boot.js"></script>
+<script src="js/fonts.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

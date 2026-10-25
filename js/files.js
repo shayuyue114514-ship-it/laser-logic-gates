@@ -6,43 +6,40 @@ function refreshFileName() {
   fileNameDom.textContent = currentFileName || ("未命名" + SAVE_EXT);
 }
 
-// 打开（或首次建立）句柄库；不支持 IndexedDB 时静默返回 null，记忆功能降级为「不记忆」，不影响正常存取
-function openHandleDB() {
-  return new Promise(function (resolve) {
-    let req;
-    try { req = indexedDB.open(FS_DB_NAME, 1); } catch (err) { resolve(null); return; }
-    req.onupgradeneeded = function () { req.result.createObjectStore(FS_STORE_NAME); };
-    req.onsuccess = function () { resolve(req.result); };
-    req.onerror = function () { resolve(null); };
-  });
-}
+// 打开句柄库、记住句柄、读回句柄、起始目录这四件事都在 handle-store.js：
+// 它们是编辑器与首页共用的，首页不加载本文件，所以不能留在这里；本文件按名字直接调用即可
 
-// 把这次用过的文件句柄记下来：同时更新内存，本次会话马上生效；再写进库，跨会话也能读回
-// 句柄是可序列化的，能直接存进 IndexedDB；写库失败只影响下次的起始目录，不影响本次存取，所以静默吞掉
-function rememberPickerHandle(handle) {
-  lastPickerHandle = handle;
-  openHandleDB().then(function (db) {
-    if (db === null) return;
-    db.transaction(FS_STORE_NAME, "readwrite").objectStore(FS_STORE_NAME).put(handle, FS_HANDLE_KEY);
-  }).catch(function () {});
-}
+/* ========== 从首页接过来的存档 ========== */
 
-// 启动时把上次的句柄读回内存：之后选择器要用时直接读内存，不必在点击那一刻再去等异步，用户手势不会被打断
-function loadPickerHandle() {
-  openHandleDB().then(function (db) {
-    if (db === null) return null;
-    return new Promise(function (resolve) {
-      const req = db.transaction(FS_STORE_NAME, "readonly").objectStore(FS_STORE_NAME).get(FS_HANDLE_KEY);
-      req.onsuccess = function () { resolve(req.result || null); };
-      req.onerror = function () { resolve(null); };
-    });
-  }).then(function (h) { lastPickerHandle = h || null; }).catch(function () {});
-}
-
-// 选择器选项里的起始目录：有记住的句柄就带上，框会从那个文件所在的目录打开；没有就不带，交给浏览器默认
-// startIn 接受文件句柄，落在它所在的那个目录，所以不必额外去取父目录句柄
-function startInOption() {
-  return lastPickerHandle === null ? {} : { startIn: lastPickerHandle };
+// 接着首页刚选好的那份存档打开：只在这两样同时成立时才动手——地址带着标记，且暂存里真有内容
+// 「打开」的系统文件框只允许在用户刚点过东西的那一刻调用，所以首页读完文件只能先跳过来，由这里把内容接上
+// 检查放在初始化的最后（main.js 里那一句），此时画布、元件层、各面板都已就绪，铺存档不会被后面的步骤冲掉
+async function resumePendingScene() {
+  if (location.hash !== HANDOFF_MARK) return;   // 不是从首页跳来的，一切照常，不动画面
+  // 标记用过就抹掉：不清的话刷新一次会再导入一遍，把用户之后的编辑整个顶掉
+  history.replaceState(null, "", location.pathname + location.search);
+  const text = sessionStorage.getItem(HANDOFF_KEY);
+  sessionStorage.removeItem(HANDOFF_KEY);   // 同样取完即清：暂存只负责这一次交接，不留到下一次
+  if (text === null) return;                // 只有标记没有内容（比如用户手工敲的地址）：静默退回普通启动
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    console.log("[文件] 从首页带来的内容不是合法 JSON，已忽略");
+    return;
+  }
+  const parsed = parseScene(raw);
+  if (!parsed.ok) { console.log("[文件] 从首页带来的存档不可用：" + parsed.reason); return; }
+  applyScene(parsed);
+  // 句柄：首页已经把它写进同一个库、同一个键，上一句读完的 lastPickerHandle 就是刚选的那个文件
+  // 这里把它接成「当前文件」，之后点保存仍然直接写回原文件，不必再去选一次
+  if (lastPickerHandle !== null) {
+    currentFileHandle = lastPickerHandle;
+    currentFileName = lastPickerHandle.name;
+    refreshFileName();
+  }
+  console.log("[文件] 已接着打开 " + (currentFileName || "未命名") +
+    (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
 }
 
 // 打开：选一个存档读进画面
@@ -51,7 +48,9 @@ async function onOpenFile() {
   if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); return; }
   let handle;
   try {
-    const handles = await window.showOpenFilePicker(Object.assign({ multiple: false, types: SAVE_FILE_TYPES }, startInOption()));
+    // 打开框不带类型过滤：过滤规则由系统按文件类型判定，曾出现本程序后缀的文件在框里选不到的情形
+    // 能不能用不靠后缀把关，而是由读进来之后的内容校验决定，所以这里不传 types
+    const handles = await window.showOpenFilePicker(Object.assign({ multiple: false }, startInOption()));
     handle = handles[0];   // 只允许选一个，返回的数组里必定有且只有一项
   } catch (err) {
     // 取消同样不是错误，静默收场
@@ -128,7 +127,7 @@ async function onSaveFileAs() {
   currentFileHandle = handle;
   currentFileName = handle.name;
   refreshFileName();
-  if (await writeCurrentFile()) console.log("[文件] 已另存为 " + currentFileName);
+  await runSave();
 }
 
 // 保存：写回当前文件；还没绑定过文件就退化成另存为，让「保存」永远有结果，不必先去点另存为
@@ -137,40 +136,105 @@ async function onSaveFile() {
   // 这一行是同步打出来的，它出现得晚，就说明问题在它之前，与下面几段无关
   console.log("[文件] 保存开始：" + (currentFileHandle === null ? "尚未绑定文件，转另存为" : currentFileName));
   if (currentFileHandle === null) { await onSaveFileAs(); return; }
-  if (await writeCurrentFile()) console.log("[文件] 已保存到 " + currentFileName);
+  await runSave();
 }
 
-// 把当前电路写进当前文件，成功返回 true
-// 写入期间改的是临时文件，关流那一下才真正替换原文件，所以中途出错不会把旧存档毁掉
+let savingNow = false;    // boolean：已经有一趟写盘在路上
+let saveAgain = false;    // boolean：写盘期间又被要求存一次，收尾再补一趟
+let pendingCommit = null; // Promise<void>|null：最近一趟保存的收尾（系统把新内容换到原文件上）还没落地时非空
+
+// 同一时刻只允许一趟写盘
+// 两趟并发时，第二趟的 createWritable 要等第一趟关掉文件锁，那段等待全落在圆点的呼吸上，
+// 看起来就是「保存很久」；攒成「最多补一趟」也够，因为晚到的那次按的是同一份内容
+async function runSave() {
+  if (savingNow) {
+    // 上一趟还在收尾：收尾一旦开始就中断不了——写流进入 closing 之后 abort() 只会被拒绝，
+    // 文件锁也由浏览器握着，页面没有接口让它提前放手；就算能打断，也得从头再写一遍，总时长不会更短
+    // 能做的只是记下这一次，等它落地立刻写最新内容；打出这一行，免得按下去像没反应
+    saveAgain = true;
+    console.log("[文件] 已排队：上一趟收尾还没落地，落地后立刻写入最新内容");
+    return;
+  }
+  savingNow = true;
+  try {
+    for (;;) {
+      saveAgain = false;                          // 内容在写的那一刻现取，晚到的改动一并带上
+      if (!(await writeCurrentFile())) return;    // 写失败就先收手，不连着刷失败
+      // 等这一趟的收尾落地再考虑下一趟：同时开两条流会抢同一把文件锁，反而更慢
+      // 界面不等它：未保存的标记在上一步就灭了，这里只是队列里的一道闸
+      const commit = pendingCommit;
+      if (commit !== null) await commit;
+      if (!saveAgain) return;                     // 期间没人再按，收工
+      if (!docDirty) return;                      // 期间没有新的改动，不必再写一遍
+    }
+  } finally {
+    savingNow = false;
+  }
+}
+
+// 确认这份句柄还带着写权限；没有就当场申请一次
+// 必须在这里问：申请授权要求一个真实的用户手势，而这段时间里唯一的手势就是按下保存的那一下
+// 若拖到 createWritable 里去弹，等待会整段落进圆点的呼吸里，看上去像是写盘慢
+async function ensureWritePermission(handle) {
+  if (handle.queryPermission === undefined || handle.requestPermission === undefined) return true;  // 老浏览器没有这套接口，交给 createWritable 去要求
+  const opts = { mode: "readwrite" };
+  try {
+    if (await handle.queryPermission(opts) === "granted") return true;   // 还带着权限，直接放行，不弹任何东西
+    return await handle.requestPermission(opts) === "granted";
+  } catch (err) {
+    console.log("[文件] 权限检查出错：", err);
+    return false;
+  }
+}
+
+// 把当前电路交给浏览器写进当前文件，成功返回 true
+// 「成功」指整份内容已经交给浏览器，不包括它把临时文件换到原文件上的那一下
+// 那一下在本机实测要 7 秒左右：磁盘实测 0.4～22 毫秒，断网照旧，也没装扩展，是 Chrome 自己的提交流程
+// 界面不该陪它等：未保存的标记与圆点的呼吸都在写完之后立刻收，收尾放后台，见 pendingCommit
 async function writeCurrentFile() {
   const t0 = performance.now();
-  // 先记下这一份写的是谁：写盘那一下可能要好几秒，期间用户可能已经切到别的存档上去了，
-  // 收尾时只认这个节点，结果才不会记到别人头上（否则会把刚切过去那一份的未保存标记错误地灭掉）
+  // 先记下这一份写的是谁：收尾要好几秒，期间用户可能已经切到别的存档上去了，
+  // 收尾回来时只认这个节点，结果才不会记到别人头上
   const node = openFileNode;
-  setNodeSaving(node, true);   // 圆点从这一刻起开始呼吸：让人看出这几秒是在等写盘，不是在发呆
+  setNodeSaving(node, true);   // 圆点从这一刻起开始呼吸，但它只呼吸到这一趟写完为止
+  let stream = null;   // 写流：写失败时必须在收尾里丢掉，否则它一直占着文件锁
   try {
-    const stream = await currentFileHandle.createWritable();
-    const t1 = performance.now();
-    await stream.write(JSON.stringify(serializeScene(), null, 2));  // 缩进两格：存档是给人看的，手工改也方便
-    const t2 = performance.now();
-    await stream.close();
-    const t3 = performance.now();
-    // 真写进去了才算数：关流成功之后，画面与文件一致，未保存的标记在这里灭掉
-    // 只在「这个文件仍是当前文件」时才动这些状态：中途切走了，那份结果就不该拿去改别人
-    if (openFileNode === node) {
-      docDirty = false;
-      // 顺手丢掉内存里那份旧快照：内容已经进磁盘了，留着它只会让下次切回来摆出一个过期的画面
-      if (node !== null) node.scene = null;
+    if (!(await ensureWritePermission(currentFileHandle))) {
+      console.log("[文件] 没有写权限，本次保存放弃");
+      return false;
     }
-    // 分段耗时：慢在开流、写入、还是关流提交，一眼能看出来；正常都是几毫秒
-    // 计时用 performance.now()，与主循环里的耗时读数同一套口径
-    console.log("[文件] 写盘分段：开流 " + Math.round(t1 - t0) + " ms，写入 " + Math.round(t2 - t1) +
-      " ms，提交 " + Math.round(t3 - t2) + " ms");
+    stream = await currentFileHandle.createWritable();
+    const t1 = performance.now();
+    const text = JSON.stringify(serializeScene());  // 不缩进：存档是给程序读的，缩进只是把文件撑大，没有别的好处
+    const editsAtWrite = docEditSeq;   // 这份内容对应到第几次改动，收尾回来时靠它判断期间有没有又改过
+    await stream.write(text);
+    const t2 = performance.now();
+    // 走到这里整份内容已经在浏览器手里，界面上就算存好了：呼吸立刻停，未保存的标记立刻灭
+    // 后面那几秒只是系统把临时文件换到原文件上，不该让圆点一直呼吸，也不该让人以为还没存
+    if (openFileNode === node && docEditSeq === editsAtWrite) docDirty = false;
+    setNodeSaving(node, false);
+    console.log("[文件] 已写入 " + currentFileName + "（" + text.length + " 字节，开流 " + Math.round(t1 - t0) +
+      " ms，写入 " + Math.round(t2 - t1) + " ms），收尾在后台进行");
+    // 收尾交给后台：成功才丢掉内存里那份旧快照；失败就把未保存亮回去，不让界面说谎
+    pendingCommit = stream.close().then(function () {
+      if (node !== null && openFileNode === node) node.scene = null;
+      console.log("[文件] 收尾完成：" + Math.round(performance.now() - t2) + " ms");
+    }).catch(function (err) {
+      console.log("[文件] 收尾失败，文件没有换成新的：", err);
+      docDirty = true;   // 圆点会按这个标记在下一帧重新亮起，syncSidebarDirty 每帧都会对照
+    }).finally(function () {
+      pendingCommit = null;
+    });
+    stream = null;   // 已经交给收尾，这里不再负责丢弃它
     return true;
   } catch (err) {
     console.log("[文件] 写入失败：", err);
     return false;
   } finally {
+    if (stream !== null) {
+      // 失败时把流丢掉，让文件锁立刻释放；abort 在已失效的流上会抛，忽略即可
+      try { await stream.abort(); } catch (err) { /* 已经关掉或已失效，没有可收拾的 */ }
+    }
     // 无论写成没写成，呼吸都要停下来；写失败时圆点仍旧亮着，改动还在，等下次再存
     setNodeSaving(node, false);
   }
@@ -207,6 +271,11 @@ function addRecordsAsSelection(records, targetCX, targetCY) {
     const e = records[i];
     const el = placeElement(e.wx + offX, e.wy + offY, e.dir, e.typeId);
     el.on = e.on;
+    // 标签跟着一起搬：复制一段带说明文字的电路，粘出来的那份文字也要在，否则用户还得逐个重标一遍
+    // 方位角与距离都是相对量（相对元件格心的方向与距离），整批平移之后原样照搬就是对的
+    el.labelText = e.labelText;
+    el.labelAngle = e.labelAngle;
+    el.labelGap = e.labelGap;
     added.push(el);
   }
   // 走选区总入口：这一批成为新的选中集合，原来那批选中在这里落地（落点上的普通元件照旧被顶掉）
@@ -214,6 +283,9 @@ function addRecordsAsSelection(records, targetCX, targetCY) {
   applySelection(function (e) { return added.indexOf(e) >= 0; }, false);
   // 切到选中工具：只有在这个工具下，画布上的拖动才是「整批搬走」
   setSelectedSlot(SELECT_SLOT_INDEX);
+  // 同样把电路一次推到稳定态：新粘的这批是悬空的、参与不了模拟，但上一批恰好在这一刻落地，
+  // 落地会让它下游重新推一遍；按默认速度那又是一层层爬，看上去和读档时一样像乱了套
+  runToQuiescence();
   return added.length;
 }
 
@@ -224,7 +296,8 @@ async function onImportSelection() {
   if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); return; }
   let handle;
   try {
-    const handles = await window.showOpenFilePicker(Object.assign({ multiple: false, types: SAVE_FILE_TYPES }, startInOption()));
+    // 导入框与打开框同一条规矩：不传 types，避免系统按类型过滤把本程序的文件挡在外面
+    const handles = await window.showOpenFilePicker(Object.assign({ multiple: false }, startInOption()));
     handle = handles[0];   // 只允许选一个，返回的数组里必定有且只有一项
   } catch (err) {
     // 取消同样不是错误，静默收场
@@ -279,7 +352,7 @@ async function onExportSelection() {
   rememberPickerHandle(handle);  // 记住这次所在的目录，下次导出框直接从这儿起步
   try {
     const stream = await handle.createWritable();
-    await stream.write(JSON.stringify(payload, null, 2));  // 与整份存档同样缩进两格，导出的文件也是给人看的
+    await stream.write(JSON.stringify(payload));  // 与整份存档同样不缩进，两处格式保持一致
     await stream.close();
     console.log("[文件] 已把 " + payload.elements.length + " 个元件导出到 " + handle.name);
   } catch (err) {
@@ -298,20 +371,62 @@ function serializeSelection() {
     if (!el.selected || el.deleting) continue;
     list.push(elementToRecord(el));
   }
-  return { format: "laser-gate", version: 1, elements: list };
+  // 格式标记与版本号直接取存档那两处常量：这份内容将来要原样走一遍 parseScene，两处的版本必须同源，
+  // 写死一个数字的话，存档结构一升版，剪贴板就会先被自己的校验挡在门外
+  return { format: SCENE_FORMAT, version: SCENE_VERSION, elements: list };
 }
 
-// 复制选区到系统剪贴板：内容是一段纯文本 JSON，与存档同格式，所以粘进文本编辑器也能直接读
+// 复制选区到系统剪贴板：内容是一段纯文本 JSON，与存档同格式，粘回编辑器能原样读回来
 // 写剪贴板要用系统的接口，用户按下的那一下就是「用户手势」，浏览器不会拦
 async function copySelection() {
   const payload = serializeSelection();
   if (payload.elements.length === 0) { console.log("[剪贴板] 没有选区，没东西可复制"); return; }
   if (!canUseClipboard) { console.log("[剪贴板] 当前环境不支持写剪贴板"); return; }
   try {
-    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    await navigator.clipboard.writeText(JSON.stringify(payload));  // 不缩进：这份要能原样粘回来，不是给人看的
     console.log("[剪贴板] 已复制 " + payload.elements.length + " 个元件");
   } catch (err) {
     console.log("[剪贴板] 写入失败：", err);
+  }
+}
+
+/* ========== 给 AI 的文本（只出不进） ========== */
+
+// 把当前电路写成一段紧凑的纯文本：一行一个元件，列序固定，头两行是给读的人（或 AI）的图例
+// 为什么另做一份而不复用存档：存档要能原样读回来，字段名与结构一个都不能动；
+// 给 AI 看的这一份只要信息够、字数少，键名可以整列省掉，改成一行一个元件后比缩进 JSON 少一个量级
+// 只导出电路，不含视野与界面设置：那些是编辑环境，对看懂电路没有帮助
+// 顺序沿用元件在画面上的先后，不另排序：同一份电路每次复制出来都一样，方便前后对照
+function serializeSceneText() {
+  const list = [];
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el.deleting) continue;   // 正在播放消失动画的元件不算数，写进去会凭空多出一个
+    list.push(elementToRecord(el));
+  }
+  const lines = [];
+  lines.push("# 激光门电路，共 " + list.length + " 个元件");
+  lines.push("# 列序 type gx gy dir on；dir 0上 1右 2下 3左；on 0关 1开；gx 向右增、gy 向下增");
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i];
+    lines.push(r.type + " " + r.gx + " " + r.gy + " " + r.dir + " " + (r.on ? 1 : 0));
+  }
+  return lines.join("\n");
+}
+
+// 复制给 AI：把上面那段文本写进剪贴板，直接粘进对话里就行
+// 与「复制选区」分开：那份是存档格式，必须能原样粘回编辑器，所以字段名不能省；
+// 这份只出不进，怎么省字怎么来，用不着迁就读档那一侧
+// 复制的是整份电路而不是选区：给 AI 看电路通常要它看到全貌，只给一半反而看不懂
+async function copyForAi() {
+  if (elements.length === 0) { console.log("[AI 文本] 画面上还没有元件，没东西可复制"); return; }
+  if (!canUseClipboard) { console.log("[AI 文本] 当前环境不支持写剪贴板"); return; }
+  const text = serializeSceneText();
+  try {
+    await navigator.clipboard.writeText(text);
+    console.log("[AI 文本] 已复制当前电路，" + text.length + " 字符");
+  } catch (err) {
+    console.log("[AI 文本] 写入失败：", err);
   }
 }
 
@@ -320,6 +435,9 @@ async function copySelection() {
 // 粘贴事件是浏览器主动把内容递过来，不需要任何授权
 // 剪贴板里不是本程序的内容就静默忽略，不去动画面
 function onPaste(e) {
+  // 焦点在文本框里时不认领这一下：那是往框里粘一段字，不是往画面上贴元件
+  // 认领了就会去解析剪贴板里那串普通文字，解析不出来还会把「已忽略」写进日志
+  if (isTextEntry(e.target)) return;
   const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
   if (!text) return;   // 剪贴板里没有文本：不认领，交给浏览器按默认处理
   let raw;

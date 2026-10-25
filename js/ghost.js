@@ -127,8 +127,9 @@ function updateGhostRotation(dt) {
 // 每帧把每个元件的角度推向它自己的目标角度：与虚影同一套收敛和归一化，手感保持一致
 function updateElementRotations(dt) {
   const k = 1 - Math.exp(-CONFIG.rotateLambda * dt);
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  // 只走活跃表：正在转的元件必定在表里，静止的那些不必每帧再判一次
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
     // 已经静止的元件直接跳过，省掉每帧的无谓计算
     if (el.angle === el.angleTarget) continue;
     el.angle += (el.angleTarget - el.angle) * k;
@@ -139,16 +140,28 @@ function updateElementRotations(dt) {
       el.angleTarget = el.angleTarget % 360;
       el.dir = ((Math.round(el.angleTarget / 90) % 4) + 4) % 4;
       rayGraph.dirty = true;  // 朝向变了，全局阻挡属性可能随之在水平/垂直之间互换
+      // 角度落定这一下必须让元件缓存位图重画：位图里收的都是「静止」元件，转的过程中这个元件被排除在外，
+      // 若不让位图重画，转完它既不在叠加层（已静止）也不在位图里，画面上就直接消失了
+      invalidateElementCache();
     }
   }
 }
 
 // 每帧推进所有元件的选中缓动：目标由「是否被选中」决定，固定时长走缓出曲线，很快但不生硬
+// 拉框途中元件带上了预览值，就以预览为准：看着像是选中了，其实 selected 一动没动，电路照常工作
 // 正在删除的元件目标直接归零，跟着淡出一起退回常态配色，不会留下半亮的样子
 function updateSelectionAnim(dt) {
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
-    stepEased(el.selP, el.selected && !el.deleting ? 1 : 0, dt, CONFIG.selectAnimDuration);
+  // 只走活跃表：选中缓动没走完的元件必定在表里（判据里就带着「目标与缓动记着的不一致」这一条）
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
+    const on = el.selPreview !== null ? el.selPreview : el.selected;
+    stepEased(el.selP, on && !el.deleting ? 1 : 0, dt, CONFIG.selectAnimDuration);
+  }
+  // 浮动文本的高亮走同一条缓动，也认预览值：所以拉框途中它亮着，selected 却一动没动
+  for (let i = 0; i < texts.length; i++) {
+    const tx = texts[i];
+    const on = tx.selPreview !== null ? tx.selPreview : tx.selected;
+    stepEased(tx.selP, on ? 1 : 0, dt, CONFIG.selectAnimDuration);
   }
 }
 
@@ -156,8 +169,9 @@ function updateSelectionAnim(dt) {
 // 正在删除的灯目标直接归零，跟着淡出一起退回常态，不会留下半亮的残影
 // 灯以外的元件直接跳过，省掉每帧一次无谓的 stepEased
 function updateLampAnim(dt) {
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  // 只走活跃表：亮起缓动没走完、或还亮着的灯必定在表里；没在表里的灯缓动目标一动没动
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
     if (el.typeId !== "lamp") continue;
     stepEased(el.litP, el.litIn && !el.deleting ? 1 : 0, dt, CONFIG.lampAnimDuration);
   }
@@ -167,8 +181,9 @@ function updateLampAnim(dt) {
 // 用指数收敛而不是固定时长：连续跨格时每一步都从当前偏移接着走，快拖不会一顿一顿，慢拖也跟得住
 function updateMoveAnim(dt) {
   const k = 1 - Math.exp(-CONFIG.moveLambda * dt);
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  // 只走活跃表：偏移没归零的元件必定在表里，已经归零的连判都不用判
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
     if (el.mvOffU === 0 && el.mvOffV === 0) continue;  // 已经归零的直接跳过，省掉每帧的无谓计算
     el.mvOffU *= 1 - k;
     el.mvOffV *= 1 - k;
@@ -176,6 +191,16 @@ function updateMoveAnim(dt) {
     if (Math.abs(el.mvOffU) < CONFIG.moveSettle) el.mvOffU = 0;
     if (Math.abs(el.mvOffV) < CONFIG.moveSettle) el.mvOffV = 0;
     sceneDirty = true;  // 视觉位置每帧都在变，必须重绘
+  }
+  // 浮动文本跟着选区拖动时也留了一份视觉偏移，用同一个收敛系数把它收回去，两类的跟手感才一致
+  for (let i = 0; i < texts.length; i++) {
+    const tx = texts[i];
+    if (tx.mvOffU === 0 && tx.mvOffV === 0) continue;
+    tx.mvOffU *= 1 - k;
+    tx.mvOffV *= 1 - k;
+    if (Math.abs(tx.mvOffU) < CONFIG.moveSettle) tx.mvOffU = 0;
+    if (Math.abs(tx.mvOffV) < CONFIG.moveSettle) tx.mvOffV = 0;
+    sceneDirty = true;
   }
 }
 

@@ -3,6 +3,14 @@
 
 /* ========== 工具函数 ========== */
 
+// 画布当前该用的像素比：直接用「渲染精度」换算出来的倍数，不再跟设备像素比取小
+// 之所以取绝对值而不是上限：设置里的精度是用户明确指定的倍率（5=1×、10=2×、20=4×），
+// 高于设备像素比就是超采样、更锐也更费，低于它就是省像素、略软，两种意图都该照做
+// 全部按像素比开位图的地方都必须走它，任何一处自己读设备像素比都会和画布对不上、贴图错位
+function effectiveDpr() {
+  return renderScaleCap;
+}
+
 // 把 v 限制在 [lo, hi] 区间，用于钳制缩放范围
 function clamp(v, lo, hi) {
   return v < lo ? lo : (v > hi ? hi : v);
@@ -136,4 +144,100 @@ function mixRgb(a, b, k) {
 function rgbCss(c) {
   return "rgb(" + Math.round(c.r) + ", " + Math.round(c.g) + ", " + Math.round(c.b) + ")";
 }
+
+// 能打字的 input 类型：只有这些身上有「正在输入一段文字」这回事
+// 滑块、勾选框、按钮那几类虽然也是 input，但键盘落在它们身上不是打字，画布的快捷键照常响应
+const TEXT_INPUT_TYPES = ["text", "search", "url", "tel", "email", "password", "number"];
+
+// 事件是不是来自一个正在输入文字的地方：就地给存档起名的那一行，以及以后可能出现的任何输入框
+// 全局的键盘与粘贴两条通道都要先问它一句：焦点在文本框里时，那些键与那一下粘贴都归文本框自己
+// 判据取事件来自的元素，而不是去认某个具体的 id，以后多一个输入框不必回来改这里
+function isTextEntry(node) {
+  if (node === null || node === undefined) return false;
+  if (node instanceof HTMLTextAreaElement) return true;
+  if (node instanceof HTMLInputElement) return TEXT_INPUT_TYPES.indexOf(node.type) >= 0;
+  return node.isContentEditable === true;
+}
+
+/* ========== 帧内耗时探针 ==========
+   目的：把一帧的耗时按阶段拆开直接打到控制台，用来定位「究竟哪一段吃掉了帧时间」，
+   而不是靠猜。关闭时每次探针只是一次布尔判断，对帧率没有可测的影响。
+   为什么放在 util.js：首页与编辑器都加载它，探针函数必须在两个页面都存在，
+   否则编辑器里插了探针、首页却因为找不到函数而在加载阶段报错。 */
+
+let profOn = false;    // boolean：探针总开关，默认关；在控制台执行 prof.on() 打开
+let profStages = new Map();  // Map<string, {ms:number, n:number}>：本统计窗口内各阶段的累计耗时与出现次数
+let profCounts = new Map();  // Map<string, number>：本窗口内累计的计数（微帧数、渲染帧数这类）
+let profValues = new Map();  // Map<string, number>：本窗口内最后一次读到的即时数值（候选数、画出数这类）
+let profFrames = 0;    // number：本窗口已统计的帧数
+let profSince = 0;     // number：本窗口起始时间戳（毫秒）；0 表示还没定起点
+const PROF_REPORT_MS = 1000;  // 汇总输出间隔：约一秒一份，数字跟得上操作又不会刷屏
+
+// 开始一段计时：关闭时返回 0，收尾时凭 0 直接跳过，省掉一次 performance.now 调用
+function pt() { return profOn ? performance.now() : 0; }
+
+// 结束一段计时并记账：t0 为 0 表示探针当时是关的，什么都不做
+function pe(label, t0) {
+  if (t0 === 0) return;
+  const dt = performance.now() - t0;
+  const e = profStages.get(label);
+  if (e === undefined) profStages.set(label, { ms: dt, n: 1 });
+  else { e.ms += dt; e.n++; }
+}
+
+// 累加一个计数读数：统计窗口结束后会除以帧数，得到「每帧多少次」
+function pcount(key, v) { if (profOn) profCounts.set(key, (profCounts.get(key) || 0) + v); }
+
+// 记下一个即时数值读数：统计窗口结束后原样输出，不做平均，适合「候选多少、画出多少」这类瞬时规模
+function pval(key, v) { if (profOn) profValues.set(key, v); }
+
+// 每帧末尾调用：攒够约一秒就打一份明细，按耗时从大到小排列，然后清零重新开始
+// frameMs 是这一帧的整帧脚本耗时，用来当百分比的分母，也用来算出「没被任何阶段覆盖的那部分」
+function profReport(nowMs, frameMs) {
+  if (!profOn) return;
+  profFrames++;
+  if (profSince === 0) { profSince = nowMs; return; }
+  const span = nowMs - profSince;
+  if (span < PROF_REPORT_MS) return;
+  const rows = [];
+  let sum = 0;
+  profStages.forEach(function (e, label) {
+    const avg = e.ms / profFrames;
+    sum += avg;
+    rows.push({ label: label, avg: avg, per: e.n / profFrames });
+  });
+  rows.sort(function (a, b) { return b.avg - a.avg; });
+  const avgFrame = frameMs > 0 ? frameMs : sum;   // 整帧耗时拿不到时退回各阶段之和，百分比仍有分母
+  console.log("[帧耗时] 整帧脚本 " + avgFrame.toFixed(2) + "ms  帧率 " + (profFrames * 1000 / span).toFixed(1) +
+    "  元件 " + elements.length + "  活跃 " + activeEls.length);
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (r.avg < 0.02) continue;   // 小到看不出来的阶段不占版面
+    console.log("  " + r.label.padEnd(14, " ") + r.avg.toFixed(2) + "ms  " +
+      (r.avg / avgFrame * 100).toFixed(1) + "%  次数/帧 " + r.per.toFixed(1));
+  }
+  const gap = avgFrame - sum;   // 没有被任何阶段覆盖的部分：探针本身的记账开销、以及漏插探针的调用
+  console.log("  " + "未归类".padEnd(14, " ") + gap.toFixed(2) + "ms  " + (gap / avgFrame * 100).toFixed(1) + "%");
+  let line = "  [读数]";
+  profCounts.forEach(function (v, key) { line += " " + key + "/帧=" + (v / profFrames).toFixed(1); });
+  profValues.forEach(function (v, key) { line += " " + key + "=" + Math.round(v); });
+  console.log(line);
+  profStages.clear();
+  profCounts.clear();
+  profValues.clear();
+  profFrames = 0;
+  profSince = nowMs;
+}
+
+// 控制台入口：prof.on() 开始每秒输出一份明细，prof.off() 停止，prof.toggle() 来回切
+window.prof = {
+  on: function () {
+    profOn = true;
+    profStages.clear(); profCounts.clear(); profValues.clear();
+    profFrames = 0; profSince = 0;
+    console.log("[帧耗时] 探针已开启，每秒输出一份明细；prof.off() 关闭");
+  },
+  off: function () { profOn = false; console.log("[帧耗时] 探针已关闭"); },
+  toggle: function () { if (profOn) window.prof.off(); else window.prof.on(); }
+};
 

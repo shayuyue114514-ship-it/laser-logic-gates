@@ -33,11 +33,19 @@ function isSceneSettled() {
   if (tutorialLitAnim.t < 1) return false;  // 教程按钮的提亮同样要查，否则动画会卡在半路不动
   if (tutorialModalAnim.t < 1) return false;  // 教程弹窗的淡入淡出也要查，否则窗口会卡在半透明或停在没显示出来的状态
   if (confirmModalAnim.t < 1) return false;  // 确认弹窗同理：它淡出途中若整帧跳过渲染，就会一直停在半透明上
+  // 标签输入框的淡入淡出同样要查：少了这一条，它淡到一半就会被判成「场景已静止」而跳过渲染，
+  // 透明度从此不再更新，看上去就是一顿一顿的，甚至会停在半透明上
+  if (labelEditorAnim.t < 1) return false;
+  // 正在原地编辑浮动文本：打字光标要一闪一闪，所以每一帧都得重绘
+  // 少了这一条，静止时那一帧会被整体跳过，光标就一直亮着不闪，甚至停在「灭」的那一段上像丢了
+  if (textEditing) return false;
   // 简介浮层：动画没走完就还在动
   if (tipAnim.t < 1) return false;
   // 元件：删除动画进行中、朝向还在转、选中缓动没走完、或拖动缓动还差一点没追上，都要继续渲染
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  // 只走活跃表：这一帧还有动静的元件都在这张表里，十万个元件里静止的那些不必每帧再判一遍
+  // 缓动刚被改过的那一帧不必在这里再判一次：上面那几趟推进刚刚把它们的目标起步了，t 已经不是 1
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
     if (el.deleting || el.angle !== el.angleTarget || el.selP.t < 1) return false;
     if (el.litP.t < 1) return false;  // 灯的亮起缓动没走完就还在变，不能整帧跳过
     if (el.mvOffU !== 0 || el.mvOffV !== 0) return false;  // 拖动缓动没归零就还在滑，不能整帧跳过
@@ -54,22 +62,18 @@ function isSceneSettled() {
 // 渲染一帧：清屏 → 画网格视口 → 画边框 → 画上方面板与底部栏 → 画选项槽 → 同步简介浮层 → 同步 SVG 元件层
 function render() {
   const vp = getViewport();
-  // 先整体清成白底，视口外自然就是空白
-  ctx.clearRect(0, 0, state.cssW, state.cssH);
-  drawGrid(vp);
-  drawLaser(vp);  // 激光在网格之上、元件之下：元件层是独立 SVG 图层，天然压在它上面
-  drawLampGlow(vp);  // 灯光晕压在激光之上、元件之下：既能柔化照到灯上的激光，又不会盖住灯本体
-  drawViewportBorder(vp);
-  drawPanelBox(vp);
-  drawBottomBar(vp);
-  drawBottomBarHint(vp);
-  drawPanelSlots(vp);
-  renderSlotTip(vp);
-  renderPanels(vp);
-  renderTutorialPanel();  // 教程弹窗是纯 DOM 浮层，压在画布所有内容之上，所以放在最后同步
-  renderConfirmPanel();   // 确认弹窗平时是隐的，只在问话时冒出；与教程弹窗同档，紧跟着它同步
-  renderElements();
-  renderGhost();
-  drawMarquee();  // 拉框画在最后，压在画布上所有内容之上，拖到哪儿都看得见
+  // 每个 t0 与紧随其后的 pe 是一对探针：只记叶子阶段，各段互不重叠，加起来就是渲染总耗时
+  // 不在这里单记一条「渲染总计」：那会和下面的子阶段重复计入，百分比与「未归类」都会失真
+  let t0 = pt(); ctx.clearRect(0, 0, state.cssW, state.cssH); drawGrid(vp); pe("渲染/网格", t0);  // 先整体清成白底，视口外自然就是空白
+  t0 = pt(); drawLaser(vp); pe("渲染/激光", t0);  // 激光在网格之上、元件之下
+  t0 = pt(); drawLampGlow(vp); pe("渲染/灯光晕", t0);  // 灯光晕压在激光之上、元件之下：既能柔化照到灯上的激光，又不会盖住灯本体
+  t0 = pt(); drawViewportBorder(vp); drawPanelBox(vp); drawBottomBar(vp); drawBottomBarHint(vp); pe("渲染/底板边框", t0);
+  t0 = pt(); drawPanelSlots(vp); renderSlotTip(vp); pe("渲染/元件面板", t0);
+  t0 = pt(); renderPanels(vp); renderTutorialPanel(); renderConfirmPanel(); renderLabelEditor(); syncTextEditField(); pe("渲染/弹窗浮层", t0);
+  t0 = pt(); renderElements(); pe("渲染/元件层", t0);
+  t0 = pt(); drawElementLabels(vp); pe("渲染/标签", t0);  // 标签画在元件之后：压在元件之上
+  t0 = pt(); drawTextEditBox(); drawFloatingTexts(vp); drawTextEditCaret(); pe("渲染/浮动文本", t0);
+  t0 = pt(); renderGhost(); pe("渲染/虚影", t0);
+  t0 = pt(); drawMarquee(); pe("渲染/拉框", t0);  // 拉框画在最后，压在画布上所有内容之上，拖到哪儿都看得见
 }
 

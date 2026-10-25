@@ -9,8 +9,9 @@
 // 悬停与点击共用它，两处判定不会算歪
 function slotIndexAt(sx, sy) {
   const vp = getViewport();
-  // 从选中槽一直扫到最后一个元件槽，中间不留空：这两类槽在面板上是连着的
-  for (let i = SELECT_SLOT_INDEX; i < ELEMENT_SLOT_BASE + PANEL_SLOT_TYPES.length; i++) {
+  // 从选中槽一直扫到面板最后一个可选的槽，中间不留空：这些槽在面板上是连着的
+  // 上界用 panelSlotCount 而不是元件槽的末尾：末尾那一个「文本」工具槽也要能点中
+  for (let i = SELECT_SLOT_INDEX; i < CONFIG.panelSlotCount; i++) {
     const r = panelSlotRect(i, vp);
     if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
   }
@@ -54,11 +55,20 @@ function updateSlotTip(dt) {
 // 这样就不必在状态切换时手动起停动画，也不会漏掉「按下时移出」这类组合
 // 亮度不参与这里的动画：按下只改变缩放，变亮与否完全由「是否选中」决定，所以按下不会闪
 function updateSlotAnim(dt) {
+  // 键盘选中没有物理按住，用一个短计时代替：时间走完自动松开，槽不会一直停在缩小状态
+  if (slotKeyPressTimer > 0) {
+    slotKeyPressTimer -= dt;
+    if (slotKeyPressTimer <= 0) {
+      slotKeyPressTimer = 0;
+      slotKeyPressIndex = -1;
+    }
+  }
   // 设置按钮就在这个数组里，跟着一起走，所以它的悬停与按下反馈与元件槽逐帧同源，不会有半点差别
   for (let i = 0; i < slotAnim.length; i++) {
-    // 按下的槽缩得比悬停更深
-    const targetScale = (i === slotPressedIndex) ? CONFIG.panelSlotPressedScale
-      : (i === slotHoverIndex ? CONFIG.panelSlotHoverScale : 1);
+    // 鼠标按下的槽缩得比悬停更深；键盘没有物理按住，只缩到悬停那一档，动作幅度更轻
+    const keyPress = i === slotKeyPressIndex && slotKeyPressTimer > 0;
+    const targetScale = i === slotPressedIndex ? CONFIG.panelSlotPressedScale
+      : ((i === slotHoverIndex || keyPress) ? CONFIG.panelSlotHoverScale : 1);
     stepEased(slotAnim[i], targetScale, dt, CONFIG.panelSlotAnimDuration);
   }
   // 提亮不参与缩放那套：它是「弹窗开着」的状态显示，不是按下反馈，所以不看悬停与按下
@@ -69,6 +79,16 @@ function updateSlotAnim(dt) {
   stepEased(tutorialModalAnim, tutorialOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
   // 确认弹窗同样走这一档时长：它一冒出来就要立刻被看见，快了像闪一下，慢了会误以为没反应
   stepEased(confirmModalAnim, confirmOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
+  // 标签输入框也走这一档：它与确认弹窗是同一类东西，冒出来和被收掉都该是同一个节奏
+  stepEased(labelEditorAnim, labelEditorOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
+}
+
+// 键盘选中槽时补一次反馈：与鼠标点击共用 slotAnim 这一份缓动数据，收缩的速度因此完全一样
+// 只记下要反馈哪个槽、持续多久，真正的缩放推进仍由 updateSlotAnim 每帧统一算，键盘这条路径不另写一套
+function pressSlotByKey(index) {
+  if (index < 0 || index >= slotAnim.length) return;
+  slotKeyPressIndex = index;
+  slotKeyPressTimer = CONFIG.panelSlotKeyPressDuration;
 }
 
 // 按当前槽数量重建槽动画状态：全部停在原尺寸、未悬停、未按下；重开或改槽数量后都要走一遍
@@ -80,6 +100,8 @@ function resetSlots() {
   }
   slotHoverIndex = -1;
   slotPressedIndex = -1;
+  slotKeyPressIndex = -1;   // 键盘按下反馈也一并归零：重开时不该有个槽停在缩小状态
+  slotKeyPressTimer = 0;
   slotSelectedIndex = ELEMENT_SLOT_BASE + 1;  // 默认选中透射器那个槽，与初始虚影形状保持一致
   // 提亮不在这里复位：它跟随的是设置开没开，属于界面状态而不是这一局的状态
   // 简介浮层一并复位：停留计时归零、浮层收起、动画标量直接停在 0，避免重开时残留上一局的浮层

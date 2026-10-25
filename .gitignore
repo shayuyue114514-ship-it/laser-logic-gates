@@ -9,3 +9,7 @@ dist.zip
 
 # wrangler 的本地缓存目录，每次部署会自动重建，里面还记着账号信息
 .wrangler/
+
+# MiSans 原始字体（十个字重的 otf，合计约 63 MB）：官方可再下载，体量大，只作子集化的输入
+# 生成的成品在 css/fonts/ 下（四个 woff2，合计约 0.65 MB），那个要随仓库走
+fonts-src/

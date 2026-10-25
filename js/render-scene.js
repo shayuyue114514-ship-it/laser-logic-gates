@@ -3,9 +3,10 @@
 
 /* ========== 尺寸与视口 ========== */
 
-// 按 devicePixelRatio 调整画布位图尺寸，并把绘制坐标系统一到 CSS 像素
+// 按当前像素比调整画布位图尺寸，并把绘制坐标系统一到 CSS 像素
+// 像素比取「设备像素比」与用户在设置里定的上限两者的较小值：上限调低就少开像素，光栅化耗时按平方下降
 function resizeCanvas() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = effectiveDpr();
   state.cssW = window.innerWidth;
   state.cssH = window.innerHeight;
   canvas.width = Math.round(state.cssW * dpr);
@@ -23,7 +24,8 @@ function getViewport() {
   const m = CONFIG.viewportMargin;
   const left = m + CONFIG.sidebarWidth;   // 竖栏占掉的那一条：网格、上方面板、底栏的左边都从它右边起算
   const top = m + CONFIG.panelHeight;
-  const w = Math.max(0, state.cssW - left - m);
+  // 右侧同样要给工具栏腾出一条：右边距仍是 m（其中一半是栏与视口之间的间隙），再减去栏宽，左右两边因此对称
+  const w = Math.max(0, state.cssW - left - m - CONFIG.rightbarWidth);
   // 底部要再给那条栏腾地方：栏高加上下各一个 panelGap，视口高度相应缩短，栏才不会压在网格上
   const bottom = CONFIG.panelGap * 2 + CONFIG.bottomBarHeight;
   const h = Math.max(0, state.cssH - top - bottom);
@@ -43,10 +45,19 @@ function isInViewport(sx, sy) {
 // 平铺的代价只是一张几十像素的小位图（只在缩放变化时重画）加一次整屏填充，与格数彻底脱钩
 // 相机移动时不必再逐帧重建网格线，静止时也不再需要那张整屏离屏位图，两种状态都只剩一次填充
 function getGridPattern(cellCss) {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = effectiveDpr();
   // 瓷砖按物理像素开位图，边长取整；缩放连续变化时这个整数会跟着跳，所以它同时充当缓存指纹
   const t = Math.max(1, Math.round(cellCss * dpr));
-  const key = t + "|" + dpr;
+  // 线宽 = 格宽 × gridLineRatio + gridLineBase，上限 1 CSS px（格宽超过约 26 px 时线不再变粗，与原观感一致）
+  // 一根固定 1 px 的线，格子越小它占的比例越大：格宽 40 px 时占 2.5%，格宽 4 px 时就占到 25%，
+  // 于是越缩网格越密、整片越压越重，元件与光束反而被盖住；让线跟着格宽一起缩，这个比例才压得住
+  // 但不能纯按比例缩：比例项到格宽 1 px 时只剩 0.03 px，0.25 px 以下就看不见了，所以加一个固定加数兜底，
+  // 线永远细不到 0.22 CSS px 以下，缩到底也仍是看得见的一根线
+  // 这里没有「小到某个尺寸就不画」的分支：线细到不足一个像素时，canvas 会把描边按覆盖面积摊成淡色，
+  // 那是它真的有这么细，不是被抹掉或单独调淡了
+  // 注意 lineWidth 为 0 在 canvas 里是「发丝线」（整整一个物理像素、满不透明），比 1 还醒目，所以下面必须挡住
+  const lw = Math.min(dpr, (cellCss * CONFIG.gridLineRatio + CONFIG.gridLineBase) * dpr);
+  const key = t + "|" + dpr + "|" + lw.toFixed(4);   // 线宽也是这幅图的一部分，一并充当缓存指纹
   if (gridTileKey === key && gridPattern !== null) return gridPattern;
   if (gridTile === null) {
     gridTile = document.createElement("canvas");
@@ -58,19 +69,19 @@ function getGridPattern(cellCss) {
   gridTileCtx.setTransform(1, 0, 0, 1, 0, 0);  // 瓷砖一律按物理像素作画，自身不带缩放
   gridTileCtx.fillStyle = COLOR.background;
   gridTileCtx.fillRect(0, 0, t, t);
-  // 线的粗细取一个物理像素当量，与格子的尺寸一起收缩；格子再小也留得住一条线，不会糊成一片蓝
-  const lw = Math.max(1, Math.min(dpr, t));
-  gridTileCtx.strokeStyle = COLOR.line;
-  gridTileCtx.lineWidth = lw;
-  gridTileCtx.beginPath();
-  // 线画在瓷砖的右边界与下边界上：平铺之后每条格子边界上恰好有一根线
-  // 线心往瓷砖里挪半个线宽，整数像素上正好落在整段像素里，既不糊也不会被边界切掉一半
-  const half = lw / 2;
-  gridTileCtx.moveTo(t - half, 0);
-  gridTileCtx.lineTo(t - half, t);
-  gridTileCtx.moveTo(0, t - half);
-  gridTileCtx.lineTo(t, t - half);
-  gridTileCtx.stroke();
+  if (lw > 0) {
+    gridTileCtx.strokeStyle = COLOR.line;
+    gridTileCtx.lineWidth = lw;
+    gridTileCtx.beginPath();
+    // 线画在瓷砖的右边界与下边界上：平铺之后每条格子边界上恰好有一根线
+    // 线心往瓷砖里挪半个线宽，整数像素上正好落在整段像素里，既不糊也不会被边界切掉一半
+    const half = lw / 2;
+    gridTileCtx.moveTo(t - half, 0);
+    gridTileCtx.lineTo(t - half, t);
+    gridTileCtx.moveTo(0, t - half);
+    gridTileCtx.lineTo(t, t - half);
+    gridTileCtx.stroke();
+  }
   gridPattern = ctx.createPattern(gridTile, "repeat");
   gridTileKey = key;
   return gridPattern;
@@ -132,6 +143,7 @@ function getLaserGlowLayer() {
 // 线段端点可能是 ±Infinity，夹到视口的世界范围即可，不必真去算无穷远
 // 辉光与光芯共用同一条 Path2D，所以路径只拼一次，两处各描各的
 function drawLaser(vp) {
+  if (renderSkip.laser) return;   // 逐层开关：排查帧率时整层跳过，画面上只留网格与元件
   if (laserSegments.length === 0) return;
 
   // 视口对应的世界范围：注意屏幕 y 向下、世界 y 向上，所以上边界对应 maxY
@@ -170,7 +182,7 @@ function drawLaser(vp) {
   // 关掉高级渲染就整段跳过：只剩最内层的光芯，激光的走向照样看得清，省下每层一次整路径描边
   // 这八层是整帧最贵的绘制，所以把它们描在一张降采样位图上再整张贴回：每层要光栅化的像素少四分之三
   // 辉光本身就是一层连续衰减的柔光，放大后与逐层满分辨率描边在肉眼上分不出差别
-  if (advancedRenderOn) {
+  if (advancedRenderOn && !renderSkip.laserGlow) {   // 逐层开关：排查帧率时可单独关掉辉光、只留光芯
     const layer = getLaserGlowLayer();
     const gc = laserGlowCacheCtx;
     const ds = CONFIG.laserGlowDownscale;
@@ -222,7 +234,7 @@ function getLampGlowSprite() {
   const h = CONFIG.lampHalf * state.scale;            // 光晕底形与灯同大，模糊后自然向外晕出
   const r = CONFIG.lampRadius * state.scale;
   const size = h * 2 + pad * 2;                       // 纹理边长（CSS px）：灯本体加两侧留白
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = effectiveDpr();
   // 缩放或像素比一变，纹理就得按新参数重画；指纹一致就说明上一张还能用
   const key = size + "|" + blurPx + "|" + r + "|" + dpr;
   if (lampGlowCacheKey === key) return lampGlowCache;
@@ -249,46 +261,143 @@ function getLampGlowSprite() {
   return lampGlowCache;
 }
 
-// 画灯的光晕：被照亮的灯在元件层之下铺一团淡红辉光，元件本体是独立 SVG 图层，天然压在光晕中心上
+// 灯光晕的离屏位图：尺寸跟着画布走，只在画布尺寸变化时重建
+// 与激光辉光同一套做法：光晕本来就是一团低频模糊，降采样一半再放大贴回肉眼分不出，光栅化面积却少四分之三
+function getLampGlowLayer() {
+  const ds = CONFIG.lampGlowDownscale;
+  if (lampGlowLayer === null) {
+    lampGlowLayer = document.createElement("canvas");
+    lampGlowLayerCtx = lampGlowLayer.getContext("2d");
+  }
+  const w = Math.max(1, Math.round(state.cssW / ds));
+  const h = Math.max(1, Math.round(state.cssH / ds));
+  // 尺寸对不上就重建；改 width/height 会顺带清空并复位上下文，所以重建之后必须重新设变换，见调用处
+  if (lampGlowLayer.width !== w || lampGlowLayer.height !== h) {
+    lampGlowLayer.width = w;
+    lampGlowLayer.height = h;
+  }
+  return lampGlowLayer;
+}
+
+// 画灯的光晕：被照亮的灯在元件层之下铺一团淡红辉光，元件本体是独立图层，天然压在光晕中心上
 // 关掉高级渲染就整段跳过，与激光辉光保持一致；强度随亮起进度一起涨落，灯不会突然冒出一团光
 // 用高斯模糊把灯的轮廓整体向外化开，而不是画一个圆形渐变：
 // 圆形渐变与方形灯形状对不上，光晕在四角和四边深浅不一，看上去就是一圈能看出来的边界
 // 之所以改成「贴一张预模糊好的纹理」而不是每盏灯当场模糊一次：每盏灯要的模糊结果完全一样，只差一个位置
 // 之所以不用「先把所有灯画进离屏再整体模糊一次」：那样相邻灯的边缘会先在离屏里叠一次，
 // 与原来「每盏灯各自模糊后逐盏叠加」在重叠处对不上，两盏灯挨着时会看出深浅不同
+// 灯多的时候走「先在降采样离屏上把各盏灯的光晕叠好、再整块贴回主画布」这条路：
+// canvas 的合成是可结合的，先把半透明贴图叠在透明底上、再按不透明贴回，与逐盏直接叠在主画布上结果一致，
+// 重叠处不会变样；而每盏灯要光栅化的像素少了降采样倍数的平方倍，灯密的时候这一项就是整帧的大头
 function drawLampGlow(vp) {
-  if (!advancedRenderOn) return;
+  if (!advancedRenderOn || renderSkip.lampGlow) return;   // 逐层开关：排查帧率时可单独关掉灯光晕
   // 画布滤镜是标准能力：纹理本身也靠它生成，浏览器不支持就干脆不画，宁可没有光晕也不要画出一圈硬邦邦的色块
   if (typeof ctx.filter !== "string") return;
   // 先扫一遍看这一帧到底有没有亮着的灯：一盏都没有就整段跳过，连纹理都不必生成
+  // 只走活跃表：亮着的灯必定在表里（判据里就带着「亮起进度大于零」这一条），不必为这一句话扫全表
   let anyLit = false;
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
     if (el.typeId === "lamp" && !el.deleting && el.litP.cur > 0) { anyLit = true; break; }
   }
   if (!anyLit) return;
 
   const sprite = getLampGlowSprite();
-  const half = lampGlowCacheSize / 2;  // 纹理边长的一半：贴图时以灯心为中心
-  ctx.save();
-  // 裁剪到视口：视口外的灯不该把光晕画到面板或画布空白处
-  ctx.beginPath();
-  ctx.rect(vp.x, vp.y, vp.w, vp.h);
-  ctx.clip();
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
+  const size = lampGlowCacheSize;   // 纹理贴出来的 CSS 边长：由位图像素数除以像素比反推，保证一比一不缩放
+  const half = size / 2;            // 半边长：贴图时以灯心为中心
+
+  // 收一遍这一帧真正要贴的灯：同样只走活跃表，并先做视口相交判断
+  // 视口外的灯原来靠裁剪挡住画面，但绘制指令照发、浏览器还要先算一次边界；这里提前剔掉，白跑的调用就不发了
+  // 顺带把用到的包围盒算出来：贴回主画布时只贴这一块，灯少而集中时贴回量就很小
+  const list = lampGlowList;
+  list.length = 0;
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
     if (el.typeId !== "lamp" || el.deleting) continue;
     const k = el.litP.cur;
     if (k <= 0) continue;  // 没亮的灯完全不画，省掉一次贴图
     // 位置取画面的视觉位置：数据位置加上拖动缓动偏移，光晕才跟着灯一起滑
     const cx = worldToScreenX(el.wx + el.mvOffU);
     const cy = worldToScreenY(el.wy + el.mvOffV);
-    // 模糊会把边缘摊薄一半，所以贴边处约是这里的一半浓度，整体就是一层淡红
-    ctx.globalAlpha = CONFIG.lampGlowAlpha * k;
-    ctx.drawImage(sprite, cx - half, cy - half, lampGlowCacheSize, lampGlowCacheSize);
+    if (cx + half < vp.x || cx - half > vp.x + vp.w) continue;   // 整个光晕都在视口左右之外
+    if (cy + half < vp.y || cy - half > vp.y + vp.h) continue;   // 整个光晕都在视口上下之外
+    list.push(cx, cy, k);
+    if (cx - half < bx0) bx0 = cx - half;
+    if (cy - half < by0) by0 = cy - half;
+    if (cx + half > bx1) bx1 = cx + half;
+    if (cy + half > by1) by1 = cy + half;
   }
-  ctx.globalAlpha = 1;
+  const n = list.length / 3;
+  if (n === 0) return;   // 视口内一盏亮灯都没有，连贴图都不必做
+  // 包围盒夹进视口：视口外的部分本来就看不见，不夹的话包围盒会白白大出一圈
+  if (bx0 < vp.x) bx0 = vp.x;
+  if (by0 < vp.y) by0 = vp.y;
+  if (bx1 > vp.x + vp.w) bx1 = vp.x + vp.w;
+  if (by1 > vp.y + vp.h) by1 = vp.y + vp.h;
+
+  // 走哪条路要先算一笔账：降采样那条把每盏灯的光栅化面积按倍数平方缩小，代价是多贴一次整块包围盒
+  // 灯少而散的时候那块包围盒比所有灯加起来还大，这时直接逐盏贴反而更省，所以按面积比一下再决定
+  const ds = CONFIG.lampGlowDownscale;
+  const boxArea = (bx1 - bx0) * (by1 - by0);
+  if (boxArea >= n * size * size * (1 - 1 / (ds * ds))) {
+    // 直接逐盏贴在主画布上：与改动前完全一样的画法，灯少时画面也因此逐像素不变
+    ctx.save();
+    // 裁剪到视口：视口外的灯不该把光晕画到面板或画布空白处
+    ctx.beginPath();
+    ctx.rect(vp.x, vp.y, vp.w, vp.h);
+    ctx.clip();
+    for (let i = 0; i < list.length; i += 3) {
+      // 模糊会把边缘摊薄一半，所以贴边处约是这里的一半浓度，整体就是一层淡红
+      ctx.globalAlpha = CONFIG.lampGlowAlpha * list[i + 2];
+      ctx.drawImage(sprite, list[i] - half, list[i + 1] - half, size, size);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    pval("亮灯", n);   // 探针读数：贴了多少次光晕贴图，这个数直接对应上面的贴图开销
+    return;
+  }
+
+  // 合成那条路：先把各盏灯的光晕叠在降采样离屏上
+  const layer = getLampGlowLayer();
+  const g = lampGlowLayerCtx;
+  // 清场先回到位图自己的像素坐标系；只清「上一帧用过的那块」与「这一帧要用到的那块」的并集，
+  // 灯少时不必每帧清整张位图；而并集一定能盖住上一帧留下的全部内容，不会留残影
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  if (lampGlowPrevUsed) {
+    const ux0 = Math.min(lampGlowPrevX0, bx0);
+    const uy0 = Math.min(lampGlowPrevY0, by0);
+    const ux1 = Math.max(lampGlowPrevX1, bx1);
+    const uy1 = Math.max(lampGlowPrevY1, by1);
+    g.clearRect(ux0 / ds, uy0 / ds, (ux1 - ux0) / ds, (uy1 - uy0) / ds);
+  } else {
+    g.clearRect(0, 0, layer.width, layer.height);
+  }
+  lampGlowPrevX0 = bx0; lampGlowPrevY0 = by0; lampGlowPrevX1 = bx1; lampGlowPrevY1 = by1;
+  lampGlowPrevUsed = true;
+  // 之后仍用 CSS 像素坐标绘制，只是整体缩小 ds 倍：主画布那份贴图代码才能原样搬过来
+  g.setTransform(1 / ds, 0, 0, 1 / ds, 0, 0);
+  g.save();
+  // 裁剪到包围盒：作画、清场、贴回都按同一块走，范围之外不会被碰
+  g.beginPath();
+  g.rect(bx0, by0, bx1 - bx0, by1 - by0);
+  g.clip();
+  for (let i = 0; i < list.length; i += 3) {
+    g.globalAlpha = CONFIG.lampGlowAlpha * list[i + 2];
+    g.drawImage(sprite, list[i] - half, list[i + 1] - half, size, size);
+  }
+  g.globalAlpha = 1;
+  g.restore();
+  // 整块贴回主画布：放大交给浏览器的双线性采样，光晕这种低频图形不会显出锯齿
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(vp.x, vp.y, vp.w, vp.h);
+  ctx.clip();
+  ctx.drawImage(layer,
+    bx0 / ds, by0 / ds, (bx1 - bx0) / ds, (by1 - by0) / ds,
+    bx0, by0, bx1 - bx0, by1 - by0);
   ctx.restore();
+  pval("亮灯", n);   // 探针读数：贴了多少次光晕贴图，这个数直接对应上面的贴图开销
 }
 
 // 画视口边框，明确标出可显示区域的边界
@@ -340,8 +449,10 @@ function drawBottomBar(vp) {
 
 // 当前有没有选中的元件：删除动画中的不算，它已经退出模拟，也不该算进选区
 function hasSelectedElement() {
-  for (let i = 0; i < elements.length; i++) {
-    if (elements[i].selected && !elements[i].deleting) return true;
+  // 只走活跃表：选中的元件必定在表里，十万个元件里不必为这一句提示扫一遍全表
+  for (let i = 0; i < activeEls.length; i++) {
+    const el = activeEls[i];
+    if (el.selected && !el.deleting) return true;
   }
   return false;
 }
@@ -354,12 +465,19 @@ function hintText() {
   // 正在拉框 / 正在拖动选区：这时候最该说清的是「松手之后会怎样」
   if (marqueeActive) return "松开完成框选";
   if (moveDragging) return "松手仍是悬空；点空白处才落地";
-  // 手上有选中的元件：这时 WASD 转的是整批，右键删的是指针下那一个
-  if (hasSelectedElement()) return "WASD旋转；右键删除";
+  // 正在原地编辑浮动文本：说清有哪两条收尾的路；回车在这里是换行，所以确定要专门点明
+  if (textEditing) return "直接输入；Esc 取消；Cmd/Ctrl+回车 完成";
+  // 手上有选中的元件：这时 WASD 转的是整批，H/V 把整批翻一次，右键删的是指针下那一个
+  if (hasSelectedElement()) return "WASD旋转；H/V镜像；右键删除";
   // 进了选中工具但手上还空着
   if (selectToolActive()) return "拖动框选；shift追加";
   // 指针不在画布上：位置相关的操作都不作数，按默认处理
   if (!pointerInside) return "";
+  // 文本工具：手上没有元件，左键的语义改成「放一段文字」或「改指针下那一块」
+  // 排在指针下元件的提示之前：这块文字画在元件之上，显示哪一条提示要跟「抓到谁」一致
+  if (textToolActive()) return "左键放置文本；拖动移动；双击编辑；右键删除";
+  // 指针停在一块浮动文本上：这三件事与手上拿什么工具无关，所以排在工具提示之后、元件提示之前
+  if (textAtPointer(pointerSX, pointerSY) !== null) return "拖动移动；双击编辑；右键删除";
   // 指针停在某个元件上：光源能开关，别的元件只能右键删
   const hovered = findElementAtPointer();
   if (hovered !== null && !hovered.deleting) {

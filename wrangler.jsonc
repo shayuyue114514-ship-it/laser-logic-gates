@@ -17,7 +17,13 @@
   "assets": {
     "directory": "./dist",
 
-    // 绑定名：Worker 里用 env.ASSETS.fetch 取静态资源，两处的名字必须一致
+    // HTML 的地址规则：取默认的这一档，并写成显式一条
+    // 在这一档下，/editor 直接取到 editor.html，而 /editor.html 会被 307 转到 /editor，
+    // 首页那四个入口跳过去之后，地址栏里留的就是 /editor，不会露出 .html
+    // 写出来而不是省着用默认值：这正是首页入口要的效果，默认值哪天变了也不至于悄悄跟着变
+    "html_handling": "auto-trailing-slash",
+
+    // 绑定名：Worker 里用 env.ASSETS 取静态资源，两处的名字必须一致
     "binding": "ASSETS",
 
     // 只有这些路径先经过 Worker 判断；其余请求仍按「静态资源优先」直接返回，不必绕路

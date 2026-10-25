@@ -3,20 +3,48 @@
 
 /* ========== 撤销 / 重做 ========== */
 
-// 两条记录是否描述同一个元件的同一状态：类型、格号、朝向、开关全一样才算没变
+// 两条记录是否描述同一个元件的同一状态：类型、格号、朝向、开关、标签全一样才算没变
+// 标签的三项都要比：改文字、把标签拖到另一个方位、把它拉近拉远，都是要能撤销的动作，漏掉任何一项都撤不回来
 function recordEquals(a, b) {
-  return a.type === b.type && a.gx === b.gx && a.gy === b.gy && a.dir === b.dir && a.on === b.on;
+  return a.type === b.type && a.gx === b.gx && a.gy === b.gy && a.dir === b.dir && a.on === b.on &&
+    a.label === b.label && a.labelAngle === b.labelAngle && a.labelGap === b.labelGap;
+}
+
+// 两条记录里的标签三项是否一致：改文字、把标签拖到另一个方位、把它拉近拉远，各占一项
+// 单独拎出来比，是因为悬空中的元件只按这一组判断「改过标签没有」，见 commitHistory 里那一段
+function labelEquals(a, b) {
+  return a.label === b.label && a.labelAngle === b.labelAngle && a.labelGap === b.labelGap;
+}
+
+// 拿基准记录的位置、朝向、开关，配上当前记录的标签三项，得到一条「只差标签」的记录
+// 位置沿用基准而不沿用当前，这一点是关键：悬空中的元件还没落位，
+// 这一步只该改标签，绝不能把它挪到别处（它现在的位置由选区那一套管着）
+function mergeLabelRecord(base, cur) {
+  const rec = { type: base.type, gx: base.gx, gy: base.gy, dir: base.dir, on: base.on };
+  if (cur.label !== undefined) {
+    rec.label = cur.label;
+    rec.labelAngle = cur.labelAngle;
+    rec.labelGap = cur.labelGap;
+  }
+  return rec;
 }
 
 // 把元件按记录摆回原样：位置、朝向、开关，以及各种动画与拖动的残留一并归零
 // 撤销与重做都走它，两个方向写的是同一套字段，不会出现「撤销干净、重做留尾巴」
 function writeRecord(el, rec) {
+  const oldWx = el.wx, oldWy = el.wy;   // 改坐标之前先记下旧格号，格子索引要按新旧两个格号摘挂
   el.wx = rec.gx + 0.5;   // 元件恒在格心，格号加半格就是世界坐标
   el.wy = rec.gy + 0.5;
+  reindexElement(el, oldWx, oldWy);   // 位置可能被摆回别处，格子索引跟着一起挪，按格查元件才不会查空
   el.dir = rec.dir;
   el.angle = rec.dir * 90;
   el.angleTarget = el.angle;
   el.on = rec.on;
+  // 标签：记录里没有 label 就说明撤销到的那一刻这个元件没有标签，文字清空、方位与距离回默认
+  // 只清文字而不复位这两个量的话，下次再给它起名会突然出现在上一次拖过的那个方位与远近上
+  el.labelText = rec.label === undefined ? "" : rec.label;
+  el.labelAngle = rec.labelAngle === undefined ? CONFIG.labelAngleDefault : rec.labelAngle;
+  el.labelGap = rec.labelGap === undefined ? CONFIG.labelGapDefault : rec.labelGap;
   el.mvOffU = 0;      // 拖动缓动的视觉偏移归零，画面与数据立刻对齐
   el.mvOffV = 0;
   el.orbitU0 = null;  // 公转起点作废，避免残留的起点被下一段公转当成自己人
@@ -25,10 +53,23 @@ function writeRecord(el, rec) {
   el.deleteP = 0;
 }
 
+// 只把标签三项写回元件，位置、朝向、开关一律不碰
+// 与 writeRecord 分开，是因为标签的改动是就地确定的，与位置无关：
+// 记下这一步时那个元件可能还悬在半空，位置一动它就会跳到别处，而位置本该由选区那一套去管
+function writeLabelRecord(el, rec) {
+  el.labelText = rec.label === undefined ? "" : rec.label;
+  el.labelAngle = rec.labelAngle === undefined ? CONFIG.labelAngleDefault : rec.labelAngle;
+  el.labelGap = rec.labelGap === undefined ? CONFIG.labelGapDefault : rec.labelGap;
+}
+
 // 把元件挂回画面：数据回到列表即可；已经在列表里的只补状态，不重复插入
 // 元件直接画在画布上，没有节点要挂；撤销回来的元件一律是落定状态，不会带着悬空身份复活
 function attachElement(el) {
-  if (elements.indexOf(el) < 0) elements.push(el);
+  if (elements.indexOf(el) < 0) {
+    elements.push(el);
+    indexElement(el);      // 挂回元件表的同时挂回格子索引，按格查元件才不会漏掉它
+    rayGraph.dirty = true; // 下标变了，阻挡图与结算缓冲下一微帧会一起重建
+  }
   el.selected = false;
   el.deleting = false;  // 撤销删除时元件可能还在播消失动画，不清掉的话动画会接着放完、把它真的摘走
   el.deleteP = 0;
@@ -42,7 +83,11 @@ function attachElement(el) {
 // 摘掉只是「离开画面」，元件对象还被历史里的差分引用着，撤销时原样挂回去
 function detachElement(el) {
   const i = elements.indexOf(el);
-  if (i >= 0) elements.splice(i, 1);
+  if (i >= 0) {
+    unindexElement(el);    // 先从格子索引里退掉，它那一格随它一起离开画面
+    elements.splice(i, 1);
+    rayGraph.dirty = true; // 下标变了，阻挡图与结算缓冲下一微帧会一起重建
+  }
   const g = moveGroup.indexOf(el);
   if (g >= 0) moveGroup.splice(g, 1);
   el.selected = false;
@@ -51,6 +96,7 @@ function detachElement(el) {
 // 重建已落定对照表：只有不正在消失的元件才算电路里的人
 // 悬空中的元件保留它进悬空前的记录：它只是暂时离地，位置还没定下来，不能拿它现在的位置当基准
 // 每次记步与每次撤销/重做之后都要重建，否则下一次比对会拿旧样子当基准、算出假差异
+// 浮动文本那张表也一并重建：文字没有「悬空」这回事，画面上的每一块就是它落定的样子
 function rebuildCommittedTable() {
   const next = new Map();
   for (let i = 0; i < elements.length; i++) {
@@ -58,17 +104,24 @@ function rebuildCommittedTable() {
     if (el.deleting) continue;
     if (el.selected) {
       const prev = committedTable.get(el.id);
-      if (prev !== undefined) next.set(el.id, prev);  // 悬空期间新来的（粘贴、导入）本来就不在表里，不建条目
+      // 悬空期间新来的（粘贴、导入）本来就不在表里，不建条目
+      // 已经在表里的：位置与朝向沿用进悬空前的旧记录（取消悬空时要靠它摆回原位），但标签三项换成当前的
+      // 不换的话，下一次改标签会拿一个过时的基准去比，撤销时会一次退掉两步
+      if (prev !== undefined) next.set(el.id, { rec: mergeLabelRecord(prev.rec, elementToRecord(el)), el: el });
       continue;
     }
     next.set(el.id, { rec: elementToRecord(el), el: el });
   }
   committedTable = next;
+  const nextTexts = new Map();
+  for (let i = 0; i < texts.length; i++) nextTexts.set(texts[i].id, { rec: textToRecord(texts[i]), tx: texts[i] });
+  committedTextTable = nextTexts;
 }
 
-// 记一步：把这一刻的已落定电路与上一次落定时逐条比，差异就是这一步
+// 记一步：把这一刻的画面与上一次落定时逐条比，差异就是这一步
 // 新出现的记「挂上来」、消失的记「摘下去」、字段变了的记「从什么样变成什么样」
 // 悬空与正在消失要分开看：正在消失才算离开电路，悬空只是暂时离地，既不算离开也不算新来
+// 浮动文本同一套规矩，只是挂在它自己那张对照表与自己那组差分类型上
 function commitHistory() {
   const ops = [];
   const seen = new Set();
@@ -76,9 +129,19 @@ function commitHistory() {
     const el = elements[i];
     if (el.deleting) continue;  // 正在消失的元件已经不算电路里的人，会被下面那条「摘下去」认领
     seen.add(el.id);
-    if (el.selected) continue;  // 悬空中的这一轮不比对：位置还没定下来，落地那一刻才比
     const rec = elementToRecord(el);
     const prev = committedTable.get(el.id);
+    if (el.selected) {
+      // 悬空中的元件：位置与朝向还没定下来，整条留到落地那一刻再比 —— 对照表也要替它留着进悬空前的记录，
+      // 取消悬空时要靠那份旧记录把元件摆回原位。
+      // 但标签三项是就地确定的，必须单独比一次：双击元件本体写标签之前，那第一次点击就已经把它选中了，
+      // 所以「选中 → 写标签」是最常见的顺序，整条跳过的话这一步永远不记，撤销看上去对标签毫无作用。
+      // 更糟的是取消悬空会拿旧记录把元件摆回去，而旧记录里没有标签，于是标签被顺手抹掉、还没有一步可撤
+      if (prev !== undefined && !labelEquals(prev.rec, rec)) {
+        ops.push({ kind: "labelSet", el: el, before: prev.rec, after: mergeLabelRecord(prev.rec, rec) });
+      }
+      continue;
+    }
     if (prev === undefined) ops.push({ kind: "attach", el: el, after: rec });
     else if (!recordEquals(prev.rec, rec)) ops.push({ kind: "set", el: el, before: prev.rec, after: rec });
   }
@@ -87,8 +150,23 @@ function commitHistory() {
     // 它可能在悬空期间被搬动过，撤销删除时应该回到用户最后看到的位置
     if (!seen.has(id)) ops.push({ kind: "detach", el: v.el, before: elementToRecord(v.el) });
   });
+  const seenTexts = new Set();
+  for (let i = 0; i < texts.length; i++) {
+    const tx = texts[i];
+    seenTexts.add(tx.id);
+    const rec = textToRecord(tx);
+    const prev = committedTextTable.get(tx.id);
+    if (prev === undefined) ops.push({ kind: "textAttach", tx: tx, after: rec });
+    else if (!textRecordEquals(prev.rec, rec)) ops.push({ kind: "textSet", tx: tx, before: prev.rec, after: rec });
+  }
+  committedTextTable.forEach(function (v, id) {
+    if (!seenTexts.has(id)) ops.push({ kind: "textDetach", tx: v.tx, before: textToRecord(v.tx) });
+  });
   if (ops.length === 0) return;  // 没有真实变化就不占一步，免得空点一下也吃满一百步
-  docDirty = true;  // 电路确实变了：从这一刻起它与磁盘上的存档不再一致，列表上那一条要标出未保存
+  // 电路结构确实变了：元件缓存位图里存的是上一次的样子，整张作废，下一帧重画
+  invalidateElementCache();
+  docDirty = true;  // 画面确实变了：从这一刻起它与磁盘上的存档不再一致，列表上那一条要标出未保存
+  docEditSeq++;     // 记下改动序号：保存时靠它判断写出去的那份之后有没有又改过
   historyStack.length = historyIndex + 1;  // 在历史中间做了新动作，后面的重做分支作废
   historyStack.push(ops);
   historyIndex = historyStack.length - 1;
@@ -97,6 +175,7 @@ function commitHistory() {
 }
 
 // 执行一组差分：reverse 为真表示撤销（每条反过来做），为假表示重做
+// 元件与浮动文本各有各的几条，写法一一对应：进入、退出、改字段
 function applyOps(ops, reverse) {
   const list = reverse ? ops.slice().reverse() : ops;
   for (let i = 0; i < list.length; i++) {
@@ -108,17 +187,30 @@ function applyOps(ops, reverse) {
     } else if (op.kind === "detach") {
       if (reverse) { attachElement(op.el); writeRecord(op.el, op.before); }
       else detachElement(op.el);
+    } else if (op.kind === "textAttach") {
+      if (reverse) detachText(op.tx);
+      else { attachText(op.tx); writeTextRecord(op.tx, op.after); }
+    } else if (op.kind === "textDetach") {
+      if (reverse) { attachText(op.tx); writeTextRecord(op.tx, op.before); }
+      else detachText(op.tx);
+    } else if (op.kind === "textSet") {
+      writeTextRecord(op.tx, reverse ? op.before : op.after);
+    } else if (op.kind === "labelSet") {
+      // 只改标签三项，位置与朝向一律不碰：这一条多半是元件还悬空时记下的，
+      // 那种时刻它的位置由选区管着，把位置写回去会让它当场跳走
+      writeLabelRecord(op.el, reverse ? op.before : op.after);
     } else {
       writeRecord(op.el, reverse ? op.before : op.after);
     }
   }
   rayGraph.dirty = true;  // 元件增删或字段变了，谁挡谁与激光场都得重算
   sceneDirty = true;
-  docDirty = true;  // 撤销与重做同样在改电路：改完就与磁盘上那份不一样了，未保存的标记照旧要亮
+  docDirty = true;  // 撤销与重做同样在改画面：改完就与磁盘上那份不一样了，未保存的标记照旧要亮
+  docEditSeq++;     // 撤销与重做也算一次改动，序号照加：它们同样改变了画面内容
 }
 
-// 撤销/重做前先把正在进行的交互收干净：拖动、拉框、公转全部中断
-// 不回退它们已经造成的画面状态，因为紧接着的撤销/重做会把电路整个摆正
+// 撤销/重做前先把正在进行的交互收干净：拖动、拉框、拖标签、拖浮动文本、公转全部中断
+// 不回退它们已经造成的画面状态，因为紧接着的撤销/重做会把画面整个摆正
 function settleInteractions() {
   moveDragging = false;
   movePointerId = -1;
@@ -128,6 +220,17 @@ function settleInteractions() {
   marqueePressing = false;
   marqueeActive = false;
   marqueePointerId = -1;
+  labelDragging = false;
+  labelDragActive = false;
+  labelPointerId = -1;
+  labelDragEl = null;
+  textDragging = false;
+  textDragActive = false;
+  textPointerId = -1;
+  textDragEl = null;
+  // 原地输入中的浮动文本一并收掉，且按「放弃」收：紧接着的撤销/重做会把画面整个摆正，
+  // 若在这里把它当成一次新改动记一步，就会在撤销的途中又插进一条历史
+  if (textEditing) endTextEditing(false);
   orbitActive = false;
   orbitP = 0;
   orbitTurns = 0;

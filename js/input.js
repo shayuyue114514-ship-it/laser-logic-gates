@@ -43,10 +43,29 @@ function setupInput() {
     if (e.button === 1) e.preventDefault();
   });
 
-  // 右键：屏蔽浏览器右键菜单，右键在画布上的语义改成「删除指针所在格的元件」
+  // 右键：屏蔽浏览器右键菜单，右键在画布上的语义改成「删除指针所在的东西」
+  // 先问浮动文本：它画在元件之上，按「看到谁在最上面就删谁」的直觉，它在元件之前接手
   canvas.addEventListener("contextmenu", function (e) {
     e.preventDefault();
+    if (deleteTextAtScreen(e.clientX, e.clientY)) return;
     deleteElementAtScreen(e.clientX, e.clientY);
+  });
+
+  // 双击：改文字。浮动文本在任何工具下都能改，元件标签只在选中工具下能改
+  // 浮动文本不属于电路，不受「只有选中工具才操作画布上的东西」那条限制，所以它排在工具判断之前
+  // 元件标签那一路：第一次点击本身已经把元件选中了（选中工具下点击就是选中），
+  // 所以「先选中再快速点一下」自然就凑成一次双击；点在标签上就改那块标签，两处归到同一个输入框
+  canvas.addEventListener("dblclick", function (e) {
+    if (labelEditorOpen || textEditing) return;  // 正在输入中：这次双击的第一次点击已经把输入收掉了，不必再开一次
+    pointerSX = e.clientX;
+    pointerSY = e.clientY;
+    const tx = textAtPointer(e.clientX, e.clientY);
+    if (tx !== null) {
+      beginTextEditing(tx, false);  // 浮动文本就地改，不弹窗：字就在眼前，改的时候要看得见上下文
+      return;
+    }
+    if (!selectToolActive()) return;  // 别的工具下双击元件标签没有语义，让它落空好过让它改错东西
+    beginLabelEditingAtPointer();
   });
 
   canvas.addEventListener("pointerdown", function (e) {
@@ -55,20 +74,67 @@ function setupInput() {
     pointerSY = e.clientY;
     pointerInside = true;
     sceneDirty = true;  // 点击可能选槽、开关光源或放置元件，画面必须更新一次
+    // 记住这一下点进来之前是不是正在原地编辑文字，因为下面那句 canvas.focus() 会立刻把输入框的焦点抢走，
+    // 输入框随即失焦并把这一次输入收下；等到再往下判时 textEditing 已经是假的了
+    // 不在这里先记一笔的话，这一下就不会被吃掉，会接着去放置元件或拉框，变成「点一下收尾顺带又干了别的」
+    const wasTextEditing = textEditing;
     canvas.focus();
     // 左键：先判是不是点在选项槽上（是则选中该槽并进入按下态、不放置），否则在指针所在格心放置元件
     if (e.button === 0) {
       const hit = slotIndexAt(e.clientX, e.clientY);
       if (hit >= 0) {
+        // 点选项槽是带着明确目标的一下，与「点画布空白」分开对待：
+        // 输入还开着就先把它收下（失焦那一步多半已经收过了，重复调用没事），然后照常选槽，这一下不被吃掉
+        // 若把这一下也吞掉，用户要连点两下才切得动工具，会以为槽坏了
+        if (wasTextEditing) endTextEditing(true);
+        if (labelEditorOpen) closeLabelEditor(true);
         slotPressedIndex = hit;  // 按下态：只缩得更深，不改亮度，避免按下时闪一下
         // 两个按钮只是「长得像槽」，它们不是可选项：不能改选中项，否则虚影会去查一个不存在的元件
         // 选中槽与元件槽都能选中；从选中工具切到别的工具时，选区会被立刻收掉（元件就地落位）
         if (isPickableSlot(hit)) setSelectedSlot(hit);
         return;
       }
+      // 画布上的其余位置：正在原地编辑浮动文本时，这一下只用来把输入收下，不再去拉框或放置
+      // 用户点到别处，本意就是结束这次输入；收下而不是丢弃，是因为不小心点到空白会把刚敲的一段话弄丢
+      // 上面那次失焦多半已经收过了，endTextEditing 内部会认出这种情况直接走开，不会重复写一遍
+      if (wasTextEditing) {
+        endTextEditing(true);
+        return;  // 这一下已经被输入框吃掉，不再往下走
+      }
+      // 标签输入框还开着时同理：画布上的左键一律先当作「收起并把字存下」
+      if (labelEditorOpen) {
+        closeLabelEditor(true);
+        return;  // 这一下已经被输入框吃掉，不再往下走
+      }
       // 选中工具激活时，画布上的左键一律是「选择」：按住不动是单击选中，拖动就成了拉框
       // 这一步必须排在放置和开关光源之前，否则选中工具会被这两个操作抢走左键
       if (selectToolActive()) {
+        // 按在浮动文本上：它是画在最上面的一层，判定排在最前，按「看到谁在最上面就抓到谁」来分
+        // 按它也等于按它所在的那一块：选区随之变成只有它（没按 Shift 时），然后立刻进入拖动准备态，
+        // 所以「按下去就能拖」这个手感与从前一样，只是顺手把它以及整批选区都带上了
+        // 本来就是选中态、且没按 Shift 时直接拖整批：这一支要留在前面，否则拖一块已经在选区里的文字会先把别的选中项丢掉
+        const hitText = textAtPointer(e.clientX, e.clientY);
+        if (hitText !== null) {
+          if (!e.shiftKey && hitText.selected) {
+            beginMove(e);
+            return;
+          }
+          applyTextSelection(function (tx) { return tx === hitText; }, e.shiftKey);
+          // 走一次元件那个总入口：一次单击只该留下这一个对象，与点元件时的行为一致；
+          // 它同时负责把上一批选中落位、刷新激光，以及把上面那次文字选中一起记成一步
+          // 按住 Shift 时传下去，让元件那一批按翻转规则原样保留，不会被这一次点文字清掉
+          applySelection(function () { return false; }, e.shiftKey);
+          if (hitText.selected) beginMove(e);
+          return;
+        }
+        // 按在标签上：标签是元件挂出来的一行字，它的判定排在元件本体之前，否则标签永远抓不住
+        // 这一步也必须排在拖动选区与拉框之前；Shift 在这里是「吸附到 45° 的整数倍」，不再留给拉框翻转，
+        // 因为一次拖动是从哪按下的就已经定了性质，从标签上按下就是拖标签
+        const labelEl = labelAtPointer(e.clientX, e.clientY);
+        if (labelEl !== null) {
+          beginLabelDrag(e, labelEl);
+          return;
+        }
         // 按在「已选中」的元件上（且没按 Shift）＝拖动这一批选中的元件
         // Shift 留给框选的翻转模式，两者不抢同一个手势；按在空处或未选中的元件上仍是拉框
         const hitEl = findElementAtPointer();
@@ -77,6 +143,12 @@ function setupInput() {
           return;
         }
         beginMarquee(e);
+        return;
+      }
+      // 文本工具：左键的语义是「放一段浮动文本」或「改指针下那一块」
+      // 要排在下面那条「点在已占用的格子上就交给元件」之前，否则点在有元件的地方会被它截走去开关光源
+      if (textToolActive()) {
+        onTextToolClick(e.clientX, e.clientY);
         return;
       }
       // 左键点在已占用的格子上：交给元件自己处理（目前只有光源响应，切换开关），无论成不成都不再放置
@@ -108,6 +180,8 @@ function setupInput() {
     updateSlotHoverAt(e.clientX, e.clientY);
     moveMarquee(e);  // 拉框与拖视野是两个互斥的指针操作，各认各的指针 id，互不干扰
     moveSelectionDrag(e);  // 拖动选中元件同理，也是各认各的指针 id
+    moveLabelDrag(e);      // 拖标签同理：四种指针操作各认各的 id，同时只有一个能真的动起来
+    moveTextDrag(e);       // 拖浮动文本同理
     if (!state.isPanning || e.pointerId !== state.panPointerId) return;
     const dx = e.clientX - state.panLastX;
     const dy = e.clientY - state.panLastY;
@@ -123,7 +197,10 @@ function setupInput() {
     pointerSX = e.clientX;
     pointerSY = e.clientY;
     pointerInside = true;
-    canvas.focus();
+    // 正在原地编辑浮动文本、或改标签的弹窗开着时不抢焦点：两者都会盖在画布上，
+    // 鼠标从框里移出来落到画布上也会走到这里，这一抢会把焦点从输入框夺走，接着就打不进字了
+    // 编辑期间本来也不需要画布的键盘：这一刻用户要敲的是字，不是 WASD
+    if (!textEditing && !labelEditorOpen) canvas.focus();
     sceneDirty = true;  // 指针可能正好从槽上进入画布，槽的悬停状态与虚影都要立刻反映出来
     // 这里也判一次槽的悬停，避免要等第一次移动才生效
     updateSlotHoverAt(e.clientX, e.clientY);
@@ -165,6 +242,8 @@ function setupInput() {
     // 拉框收尾放在最前：松开左键必须把拉框结掉，否则框会一直挂在屏幕上
     if (e.pointerId === marqueePointerId) endMarquee(e);
     if (e.pointerId === movePointerId) endMove(e);  // 拖动收尾：清落点被覆盖的元件并复位状态
+    if (e.pointerId === labelPointerId) endLabelDrag(e);  // 拖标签收尾：只收状态并记一步，标签留在松手处的方位
+    if (e.pointerId === textPointerId) endTextDrag(e);    // 拖浮动文本收尾：只收状态并记一步，文字留在松手处
     if (e.pointerId !== state.panPointerId) return;
     endPan(e.pointerId);
   });
@@ -174,6 +253,8 @@ function setupInput() {
     slotPressedIndex = -1;  // 系统取消不算一次点击，只退出按下态
     if (e.pointerId === marqueePointerId) cancelMarquee(e);  // 拉框也要一并收掉，否则框会留在屏幕上
     if (e.pointerId === movePointerId) cancelMove(e);  // 拖动被系统打断：元件退回原位再收状态
+    if (e.pointerId === labelPointerId) cancelLabelDrag(e);  // 拖标签被打断：标签退回按下时的方位
+    if (e.pointerId === textPointerId) cancelTextDrag(e);    // 拖浮动文本被打断：文字退回按下时的位置
     if (e.pointerId !== state.panPointerId) return;
     endPan(e.pointerId);
   });
@@ -215,12 +296,20 @@ function setupInput() {
       if (e.code === "Escape") tutorialOpen = false;  // Esc 是关模态窗口的通用习惯，顺手支持一下
       return;
     }
+    // 焦点在文本框里时整段让路：就地给存档起名的那一行，以及以后可能出现的任何输入框
+    // 位置排在模态窗口之后、其余快捷键之前：先让模态窗口说了算，再轮到文本框
+    // 少了这一句，框里打出的 w a s d 会被当成旋转、数字会被当成选槽、s 会被当成保存，
+    // 而且是先拦掉默认行为再处理，字根本进不了框，看上去就像焦点压根没进去
+    if (isTextEntry(e.target)) return;
     // Cmd+S / Ctrl+S：保存。放在最前面拦，因为这是全局快捷键，与指针在不在画布上无关
     // 必须拦掉默认行为，否则浏览器会弹「保存网页」的框，把页面本身存成一个文件
     // 用键位码而不是键名，避免中文输入法把键名改掉；Mac 认 Cmd，其它平台认 Ctrl
     if (e.code === "KeyS" && cmdKeyHeld(e)) {
       e.preventDefault();
       saveKeyDone = true;   // 记下这一轮已经在按下这一步处理过，抬起 KeyS 时不再补存一次
+      // 按住不放会一路重复触发：不拦的话一次长按就能排出十几趟写盘，它们堵在同一把文件锁上等着，
+      // 圆点会一口气呼吸很久，而真正写进去的只有最后那一趟
+      if (e.repeat) return;
       onSaveFile();
       return;
     }
@@ -260,13 +349,31 @@ function setupInput() {
       setDebugPanelVisible(!debugPanelVisible);
       return;
     }
-    // 数字键与鼠标点槽等价：只改选中项并换掉手上的虚影，不进入按下态（键盘没有按住不放这回事）
-    // 上限取元件类型数量，所以以后往面板里加元件，数字键自然跟着往后扩，不必改这里
+    // Shift+数字：与鼠标点右侧工具栏对应的格子等价，第 1 格是运行开关、第 2 格是前进一步，其余格子尚无功能
+    // 不按 Shift 时数字选的是元件槽，所以这两组必须分开判断，Shift 在这里是唯一的区分依据
+    // 带 Cmd / Ctrl 时不抢：那两个修饰键下的数字是浏览器的切换标签页
+    const rightDigit = digitKeyIndex(e.code);
+    if (rightDigit >= 0 && e.shiftKey && !cmdKeyHeld(e)) {
+      const box = rightBarToolsDom.children[rightDigit];
+      if (box) {
+        e.preventDefault();
+        pressRightBarBox(box);   // 键盘没有物理按住，先补一次按下态，收缩动画与鼠标点击完全一样
+        box.click();   // 走与鼠标点击同一条处理路径，两边的行为不必各写一份
+      }
+      return;
+    }
+    // 数字键与鼠标点槽等价：只改选中项并换掉手上的虚影，不进入按住态
+    // 判据用 isPickableSlot 而不是写死数量：1 到 5 落在元件槽上，6 落在末尾那个「文本」工具槽上，
+    // 以后再加元件类型，数字键自然跟着往后扩，文本槽的位置也自动随之顺延，这里不必回来改
+    // 越界的数字（7 及以上）落在三个按钮槽上，isPickableSlot 会把它挡掉，所以按了什么也不会发生
     const digit = digitKeyIndex(e.code);
     if (digit >= 0) {
-      if (digit < PANEL_SLOT_TYPES.length) {
+      const slot = digit + ELEMENT_SLOT_BASE;  // 数字从 1 数起，加基准才是槽序号，1 仍对应第一个元件类型
+      if (isPickableSlot(slot)) {
         e.preventDefault();
-        setSelectedSlot(digit + ELEMENT_SLOT_BASE);   // 数字从 1 数起，加基准才是槽序号，1 仍对应第一个元件类型
+        setSelectedSlot(slot);
+        // 补一次与鼠标点击同源的按下反馈：没有物理按住，由一段短计时把缩小再回弹演完
+        pressSlotByKey(slot);
         // 选中高亮是画在画布上的：不标脏的话，静止时这一帧会被整帧跳过，上面看着像没反应
         sceneDirty = true;
       }
@@ -293,6 +400,14 @@ function setupInput() {
       }
       return;
     }
+    // H / V：把选中的这一批照选区中线翻一次，H 是左右镜像、V 是上下镜像（算法在 selection.js 的 mirrorSelection）
+    // 只作用于选区：什么都没选中时不响应；指针下那一个元件的翻转不在这里管，那属于 WASD 转朝向那一套
+    // 必须排除带 Cmd / Ctrl 的情况：macOS 上 Cmd+H 是隐藏整个应用、Cmd+V 是粘贴，不能抢过来
+    if ((e.code === "KeyH" || e.code === "KeyV") && !cmdKeyHeld(e)) {
+      e.preventDefault();
+      mirrorSelection(e.code === "KeyH" ? "h" : "v");
+      return;
+    }
     const dirKey = DIR_KEYS[e.code];  // undefined 表示不是 WASD，注意朝向索引 0 是合法值，不能拿它判空
     if (dirKey === undefined) return;
     e.preventDefault();
@@ -315,6 +430,8 @@ function setupInput() {
     const handled = saveKeyDone;
     saveKeyDone = false;   // 不论补不补，这一轮到此结束，下一轮重新计
     if (handled) return;   // 按下那一步已经存过了，别再存一次
+    // 同一条让路规则里再补上文本框：焦点在框里时，这一下是在打字母 s，不是在按保存
+    if (isTextEntry(e.target)) return;
     // 让路规则与按下那一步完全一致：模态窗口开着时，快捷键一律不响应
     // 少了这一句，按下被挡掉、抬起却补存一次，同一个按法会因为按的长短得出不同结果
     if (confirmOpen || tutorialOpen) return;
@@ -328,6 +445,15 @@ function setupInput() {
     metaHeld = false;
     ctrlHeld = false;
     saveKeyDone = false;
+  });
+
+  // 关标签页、刷新、从地址栏跳走之前拦一道：有未保存的改动就弹浏览器自带的确认
+  // 提示文字由浏览器统一决定（各家都固定了措辞，页面改不了），这里只能决定弹不弹
+  // 保存刚交出去、收尾还没落地的那几秒也算：文件还没换成新的，此刻关掉等于丢掉这一趟
+  window.addEventListener("beforeunload", function (e) {
+    if (docDirty !== true && pendingCommit === null) return;  // 与磁盘一致且不在收尾，让它走
+    e.preventDefault();    // 现代浏览器：拦下默认动作，弹出确认框
+    e.returnValue = true;  // 老浏览器只看这个返回值，赋一个真值就表示「要确认」
   });
 }
 
@@ -388,6 +514,15 @@ function resetView() {
   moveDGX = 0;
   moveDGY = 0;
   moveGroup.length = 0;
+  // 拖标签与拖浮动文本也一并收掉：两者都不会跨局延续，留着会让下一次拖动多认一个旧指针
+  labelDragging = false;
+  labelDragActive = false;
+  labelPointerId = -1;
+  labelDragEl = null;
+  textDragging = false;
+  textDragActive = false;
+  textPointerId = -1;
+  textDragEl = null;
   orbitActive = false;   // 公转也一并复位，不留半截姿态
   orbitP = 0;
   orbitTurns = 0;

@@ -9,6 +9,12 @@ function selectToolActive() {
   return slotSelectedIndex === SELECT_SLOT_INDEX;
 }
 
+// 当前是不是「文本工具」：只有它被选中时，画布上的左键才是「放一段浮动文本」
+// 与选中工具是并列的两支：选中工具操作元件，文本工具操作文字，两者互不干涉
+function textToolActive() {
+  return slotSelectedIndex === TEXT_SLOT_INDEX;
+}
+
 // 切换选中的选项槽：手上虚影随之换成新类型；从选中工具切走时立刻把选区收掉
 // 收选区必须「立刻」而不是等下次操作：元件一直离地会让画面和数据长期不一致，用户也看不到落位结果
 function setSelectedSlot(index) {
@@ -25,7 +31,14 @@ function exitSelectTool() {
   for (let i = 0; i < elements.length; i++) {
     if (elements[i].selected) { any = true; break; }
   }
+  if (!any) {
+    for (let i = 0; i < texts.length; i++) {
+      if (texts[i].selected) { any = true; break; }
+    }
+  }
   if (!any) return;  // 本来就没选中：不白跑一遍落位
+  // 先清浮动文本再走元件那个总入口：applySelection 那一次提交会把两半改动一起记成一步
+  applyTextSelection(function () { return false; }, false);
   applySelection(function () { return false; }, false);
 }
 
@@ -47,6 +60,7 @@ function landSelection(landing) {
     if (el.selected || el.deleting) continue;        // 还在选区里的自己人不能动；正在消失的元件不参与判定
     if (landing.indexOf(el) >= 0) continue;          // 这次落地的自己人留着
     if (!cellOccupiedBy(landing, el.wx, el.wy)) continue;  // 没有落地元件压住它这一格，留着
+    unindexElement(el);  // 同时从格子索引里退掉：它这一格马上要归落地的那个元件
     elements.splice(i, 1);
     removed++;
   }
@@ -84,6 +98,14 @@ function applySelection(isHit, toggle) {
   selOrientDir = 0;  // 这一批算新选区，朝向从朝上重新起算，接着按 WASD 才是相对「朝上」转
   rayGraph.dirty = true;  // 选中集合一变，参与模拟的元件就变了，阻挡图必须按新集合重建
   sceneDirty = true;
+  // 选中即离地，离地就不该再挡光、发光，所以这里立刻按新集合把激光场重算一遍
+  // 不补这一下的话，光的更新要等微帧时钟走到下一格，默认 0.12 秒、速度调慢时能到 1 秒，
+  // 那段时间里元件明明已经提亮成选中态，光却还照着它在走，看着就像「选中了却仍在工作」
+  // 这条路只在敲定选中的那一刻才走（拉框途中走的是预览，不进这里），所以手一松、光立刻就变
+  refreshLightField();
+  // 选中集变了：缓存里存的是「不选」的样子，选中那批要挪到每帧单独画的叠加层里
+  // 先作废，落地时 commitHistory 还会再作废一次，两次都只是置一个标志，下一帧只重画一次
+  invalidateElementCache();
   // 记一步：元件落地、以及落点顶掉别人，都发生在这一刻，这才是电路真正被改动的时刻
   // 拉框途中不记：每动一下都记会把一次框选拆成几十步，等松手时统一记一次
   if (!marqueeActive) commitHistory();
@@ -94,24 +116,70 @@ function applySelection(isHit, toggle) {
 function selectAtPointer(toggle) {
   const el = findElementAtPointer();
   const hitEl = (el !== null && !el.deleting) ? el : null;  // 删除动画中的元件不算点中，避免选到一个正在消失的东西
+  // 浮动文本也判一次：两者互不顶替，选中哪个只由「指针落在谁身上」决定
+  const tx = textAtPointer(pointerSX, pointerSY);
+  const hitTx = (tx !== null && !tx.deleting) ? tx : null;
+  // 先写浮动文本：applySelection 那一次提交会把两半改动一起记成一步，顺序反过来会漏记文字那一半
+  applyTextSelection(function (t) { return t === hitTx; }, toggle);
   applySelection(function (e) { return e === hitEl; }, toggle);
 }
 
-// 框选：逐个判元件所占的格子与拉框矩形是否相交，相交即命中
+// 拉框的判定框：四个边界加上半格宽，算一次留给预览与敲定两处共用
+// 半格指的是半格在屏幕上的像素数；一格是 1×1 世界单位，所以整格宽就是当前缩放
+function marqueeBox(x0, y0, x1, y1) {
+  return {
+    left: Math.min(x0, x1),
+    right: Math.max(x0, x1),
+    top: Math.min(y0, y1),
+    bottom: Math.max(y0, y1),
+    half: state.scale / 2
+  };
+}
+
+// 一个元件这一轮算不算被框命中：元件所占的整格与框相交就算
 // 用整格去判而不是用格心：框擦到格子边缘也算命中，和常见画图软件的手感一致
-function selectInMarquee(x0, y0, x1, y1, toggle) {
-  const left = Math.min(x0, x1);
-  const right = Math.max(x0, x1);
-  const top = Math.min(y0, y1);
-  const bottom = Math.max(y0, y1);
-  const half = state.scale / 2;  // 半格在屏幕上的像素数：一格是 1×1 世界单位，所以整格宽就是当前缩放
-  applySelection(function (el) {
-    const cx = worldToScreenX(el.wx);
-    const cy = worldToScreenY(el.wy);
-    if (!(cx + half >= left && cx - half <= right && cy + half >= top && cy - half <= bottom)) return false;
-    // 同一格只认最上层那个：被压住的元件不参与命中，否则一格会同时选中两个元件
-    return el === topElementAtCell(el.wx, el.wy);
-  }, toggle);
+// 同一格只认最上层那个：被压住的元件不参与命中，否则一格会同时选中两个元件
+// 预览与松手敲定共用它，两边算出来的结果必然一致，不会出现「预览亮着、松手却不一样」
+function marqueeHits(el, box) {
+  if (el.deleting) return false;   // 正在消失的元件不参与选中，预览也一样不算
+  const cx = worldToScreenX(el.wx);
+  const cy = worldToScreenY(el.wy);
+  if (!(cx + box.half >= box.left && cx - box.half <= box.right &&
+        cy + box.half >= box.top && cy - box.half <= box.bottom)) return false;
+  return el === topElementAtCell(el.wx, el.wy);
+}
+
+// 按框敲定选中：元件与浮动文本各按自己的判据来，两边都写进真实状态
+// 只在松手那一刻调用；拉框途中走 previewInMarquee，只看不动
+// 先写浮动文本：applySelection 那一次提交会把两半改动一起记成一步
+function selectInMarquee(box, toggle) {
+  applyTextSelection(function (tx) { return textHitsMarquee(tx, box); }, toggle);
+  applySelection(function (el) { return marqueeHits(el, box); }, toggle);
+}
+
+// 拉框途中的预览：只记下「现在松手会选中谁」，真正的选中状态一动不动
+// 用的是与敲定完全同一条规则（含 Shift 翻转），所以框里亮着的就是松手后会选中的
+// 每个元件都记一份三态结果：true 会选中、false 会取消、null 表示没在预览（照它自己的选中状态画）
+// 用三态而不是布尔：按住 Shift 框到已选中的元件是要把它们取消，那种「即将不再选中」也得先画出来
+function previewInMarquee(box, toggle) {
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    const hit = marqueeHits(el, box);
+    el.selPreview = el.deleting ? false : (toggle ? (hit ? !el.selBase : el.selBase) : hit);
+  }
+  // 浮动文本同一趟一起预览：它不占格子，判据换成「它自己的外框与框有没有相交」
+  // 一起预览才是一致的：框里亮着的就是松手后会选中的，两类东西不会一个亮一个不亮
+  for (let i = 0; i < texts.length; i++) {
+    const tx = texts[i];
+    const hit = textHitsMarquee(tx, box);
+    tx.selPreview = toggle ? (hit ? !tx.selBase : tx.selBase) : hit;
+  }
+}
+
+// 收掉预览：每样东西的预览结果回到 null，画面随即回到它真实的选中状态
+function clearSelectionPreview() {
+  for (let i = 0; i < elements.length; i++) elements[i].selPreview = null;
+  for (let i = 0; i < texts.length; i++) texts[i].selPreview = null;
 }
 
 // 拉框按下：记下起点并捕获指针，这样指针移出画布甚至移出窗口也能继续收到 move
@@ -124,8 +192,9 @@ function beginMarquee(e) {
   marqueeEndSX = e.clientX;
   marqueeEndSY = e.clientY;
   // 按下的这一刻把每个元件的选中状态存一份快照：按住 Shift 框选时的翻转以它为基准，
-  // 拖动过程中选中状态一直在变，不存快照的话同一个元件会被反复翻转
+  // 拖动过程中选中状态一直在变，不存快照的话同一个元件会被反复翻转。浮动文本同样存一份
   for (let i = 0; i < elements.length; i++) elements[i].selBase = elements[i].selected;
+  for (let i = 0; i < texts.length; i++) texts[i].selBase = texts[i].selected;
   canvas.setPointerCapture(e.pointerId);
 }
 
@@ -140,18 +209,20 @@ function moveMarquee(e) {
     if (dx * dx + dy * dy < CONFIG.marqueeThreshold * CONFIG.marqueeThreshold) return;
     marqueeActive = true;
   }
-  // 边拉边亮：每动一下都按当前框重算一遍选中，框到的元件立刻提亮，缩回去的自动退回未选中
-  // 与松开时用的是同一个判定，所见即所得，不会出现「预览亮着、松手结果不一样」
+  // 边拉边亮：每动一下都按当前框重算一遍预览，框到的元件立刻提亮，缩回去的自动退回原样
+  // 只写预览、不写选中，所以框还没松手时元件看着像是选中了，实则仍在电路里照常挡光发光
   // 按住 Shift 就切到翻转模式，拖动途中按下或松开 Shift 都能即时切换，不必重新拉框
-  selectInMarquee(marqueeStartSX, marqueeStartSY, marqueeEndSX, marqueeEndSY, e.shiftKey);
+  previewInMarquee(marqueeBox(marqueeStartSX, marqueeStartSY, marqueeEndSX, marqueeEndSY), e.shiftKey);
   sceneDirty = true;  // 框要跟着指针走，每动一下都得重画
 }
 
 // 拉框松开：真拉出框了就按框选一批，否则当成一次单击（选中点中的元件，或清空选中）
 // 两条路都要走，否则「按下不动再松开」会既没选中也没清空，手感很怪
+// 松手这一刻才真正落定：先收掉预览，再按同一个框把选中写进元件，元件就此离地、退出电路
 // 单击时把 Shift 状态一并传下去，这样 Shift+单击也能像 Shift+框选那样翻转，两边的规则完全一致
 function endMarquee(e) {
-  if (marqueeActive) selectInMarquee(marqueeStartSX, marqueeStartSY, marqueeEndSX, marqueeEndSY, e.shiftKey);
+  clearSelectionPreview();  // 预览让位给真实状态，下面立刻写入，中间不留下「亮着却没选中」的一帧
+  if (marqueeActive) selectInMarquee(marqueeBox(marqueeStartSX, marqueeStartSY, marqueeEndSX, marqueeEndSY), e.shiftKey);
   else selectAtPointer(e.shiftKey);
   marqueePressing = false;
   marqueeActive = false;
@@ -161,8 +232,9 @@ function endMarquee(e) {
   commitHistory();  // 框选期间刻意不记步，松手这一刻把整场框选（含落位顶替）合成一步
 }
 
-// 拉框被系统打断（如触控中断）：只收状态、不动选中，免得把用户已有的选择误清掉
+// 拉框被系统打断（如触控中断）：收掉预览、只收状态、不动选中，免得把用户已有的选择误清掉
 function cancelMarquee(e) {
+  clearSelectionPreview();  // 中断了就撤掉预览，画面回到真实的选中状态
   marqueePressing = false;
   marqueeActive = false;
   marqueePointerId = -1;
@@ -180,36 +252,68 @@ function beginMove(e) {
   moveStartWY = screenToWorldY(e.clientY);
   moveDGX = 0;
   moveDGY = 0;
+  moveDWX = 0;
+  moveDWY = 0;
   moveGroup.length = 0;
   for (let i = 0; i < elements.length; i++) {
     const el = elements[i];
     if (el.selected && !el.deleting) moveGroup.push(el);  // 删除动画中的元件不带走
   }
+  // 选中的浮动文本一起带走，另放一组：它不吸附网格，位移要按连续量走，不能与元件共用那个取整的位移
+  moveGroupTexts.length = 0;
+  for (let i = 0; i < texts.length; i++) {
+    if (texts[i].selected) moveGroupTexts.push(texts[i]);
+  }
   canvas.setPointerCapture(e.pointerId);
 }
 
-// 拖动中：按指针相对按下点的位移算出整数格位移，只把「与上次的差值」加给元件，避免每帧重复累加
-// 位移取整到整格，数据始终落在格心上；画面位置另加一份缓动偏移，松手前会平滑追上，看着不硬跳
+// 拖动中：元件按整格位移走，浮动文本按连续位移走，两边各算各的
+// 元件那条：只把「与上次的差值」加给元件，避免每帧重复累加；位移取整到整格，数据始终落在格心上
+// 文字那条：位移不取整，否则本来自由摆放的位置会被一格一格地吃掉，越拖越偏
+// 两条都各自留一份缓动偏移，松手前画面会平滑追上，看着不硬跳
 // 拖动期间相机不动，所以直接用按下时的世界坐标当基准，不必每帧换算参考点
 function moveSelectionDrag(e) {
   if (!moveDragging || e.pointerId !== movePointerId) return;
-  const dgx = Math.round(screenToWorldX(e.clientX) - moveStartWX);
-  const dgy = Math.round(screenToWorldY(e.clientY) - moveStartWY);
-  if (dgx === moveDGX && dgy === moveDGY) return;  // 还没跨到下一格：不动元件，也不必重算激光
-  const stepX = dgx - moveDGX;
-  const stepY = dgy - moveDGY;
-  moveDGX = dgx;
-  moveDGY = dgy;
-  for (let i = 0; i < moveGroup.length; i++) {
-    const el = moveGroup[i];
-    el.wx += stepX;
-    el.wy += stepY;
-    // 视觉偏移反向补上这一步：数据已经跳到新格，画面先留在原处，再由 updateMoveAnim 缓出追上
-    el.mvOffU -= stepX;
-    el.mvOffV -= stepY;
+  const dwx = screenToWorldX(e.clientX) - moveStartWX;   // 指针的连续世界位移
+  const dwy = screenToWorldY(e.clientY) - moveStartWY;
+  let moved = false;
+  // 浮动文本先算：下面元件那条会在「还没跨到下一格」时提前返回，把文字这一半跳过
+  if (moveGroupTexts.length > 0 && (dwx !== moveDWX || dwy !== moveDWY)) {
+    const sx = dwx - moveDWX;
+    const sy = dwy - moveDWY;
+    moveDWX = dwx;
+    moveDWY = dwy;
+    for (let i = 0; i < moveGroupTexts.length; i++) {
+      const tx = moveGroupTexts[i];
+      tx.wx += sx;
+      tx.wy += sy;
+      // 视觉偏移反向补上这一步：数据已经走了，画面先留在原处，再由 updateMoveAnim 缓出追上
+      tx.mvOffU -= sx;
+      tx.mvOffV -= sy;
+    }
+    moved = true;
   }
+  const dgx = Math.round(dwx);   // 元件的位移取整到整格，数据始终落在格心上
+  const dgy = Math.round(dwy);
+  if (dgx !== moveDGX || dgy !== moveDGY) {
+    const stepX = dgx - moveDGX;
+    const stepY = dgy - moveDGY;
+    moveDGX = dgx;
+    moveDGY = dgy;
+    for (let i = 0; i < moveGroup.length; i++) {
+      const el = moveGroup[i];
+      const oldWx = el.wx, oldWy = el.wy;
+      el.wx += stepX;
+      el.wy += stepY;
+      reindexElement(el, oldWx, oldWy);  // 跨了一格就换格子索引：按格查元件、拉框命中都要靠它
+      el.mvOffU -= stepX;
+      el.mvOffV -= stepY;
+    }
+    moved = true;
+  }
+  if (!moved) return;
   rayGraph.dirty = true;  // 位置变了，谁挡谁的结论随之改变，下一微帧按新位置重算激光
-  sceneDirty = true;      // 元件节点要摆到新格心上，强制重绘一次
+  sceneDirty = true;      // 元件节点要摆到新格心上，文字也要画到新位置
 }
 
 // 松开左键：只收拖动状态，不动地图上的其他元件
@@ -221,12 +325,18 @@ function endMove(e) {
   moveDGX = 0;
   moveDGY = 0;
   moveGroup.length = 0;
+  moveGroupTexts.length = 0;
+  // 浮动文本这一段位移不在 applySelection 那一步的覆盖范围内（它没有落位这回事），所以要在这里补记一步
+  // 元件那一批仍照原样推迟到下一次选区确定时再记，不跟着一起记，改动范围保持最小
+  if (moveDWX !== 0 || moveDWY !== 0) commitHistory();
+  moveDWX = 0;
+  moveDWY = 0;
   if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
   sceneDirty = true;
 }
 
-// 拖动被系统打断（如触控中断）：把元件退回原位再收状态
-// 位移是整组统一的整数格位移，反向加回去即可，不需要逐个记原始坐标
+// 拖动被系统打断（如触控中断）：把元件与文字都退回原位再收状态
+// 位移是整组统一的，反向加回去即可，不需要逐个记原始坐标
 function cancelMove(e) {
   for (let i = 0; i < moveGroup.length; i++) {
     const el = moveGroup[i];
@@ -235,12 +345,22 @@ function cancelMove(e) {
     el.mvOffU = 0;  // 退回原位是「撤销」，不该留缓动尾巴，直接归零让画面与数据立刻对齐
     el.mvOffV = 0;
   }
+  for (let i = 0; i < moveGroupTexts.length; i++) {
+    const tx = moveGroupTexts[i];
+    tx.wx -= moveDWX;
+    tx.wy -= moveDWY;
+    tx.mvOffU = 0;
+    tx.mvOffV = 0;
+  }
   if (moveDGX !== 0 || moveDGY !== 0) rayGraph.dirty = true;  // 退回去了，激光要按原位重算
   moveDragging = false;
   movePointerId = -1;
   moveDGX = 0;
   moveDGY = 0;
+  moveDWX = 0;
+  moveDWY = 0;
   moveGroup.length = 0;
+  moveGroupTexts.length = 0;
   if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
   sceneDirty = true;
 }
@@ -325,6 +445,89 @@ function rotateSelectionToDir(dirKey) {
   return true;
 }
 
+// 镜像用的中线（世界坐标）：左右镜像给一条竖线、上下镜像给一条横线，翻折就照这条线做
+// 选中有元件时一律按元件占的整格定线：格号是整数，中点加上半格仍是整数或半整数，
+// 翻过去元件依然落在格心上；只选中了浮动文本时才按文本自己的外框定线
+// 两者同时选中时中线仍只按元件算：文本是自由摆放的，把它那点零头算进来会让中线落在任意实数上，
+// 元件就会翻到格子当中，从此不再是「一格一个元件」的那个位置
+function mirrorLineWorld(axis, hasElement) {
+  if (hasElement) {
+    const b = selectionBounds();
+    if (b !== null) return axis === "h" ? (b.uMin + b.uMax) / 2 + 0.5 : (b.vMin + b.vMax) / 2 + 0.5;
+  }
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < texts.length; i++) {
+    const tx = texts[i];
+    if (!tx.selected) continue;
+    const m = textBlockMetrics(tx);
+    // 外框的世界尺寸：宽度是按屏幕量出来的像素，除以缩放换回世界单位
+    const size = (axis === "h" ? m.w : m.h) / state.scale;
+    const a = axis === "h" ? tx.wx : tx.wy;
+    if (a < lo) lo = a;
+    if (a + size > hi) hi = a + size;
+  }
+  if (lo > hi) return 0;   // 没有任何东西可选（调用方已经拦过，这里只是不让它算出 NaN）
+  return (lo + hi) / 2;
+}
+
+// 把选中的这一批照中线翻一次：H 是左右镜像，V 是上下镜像
+// 与 WASD 旋转走同一路：元件那半只改悬空中的坐标与朝向，历史留到选区结束、落位那一刻统一记，
+// 于是「翻转 + 落位」在撤销栈里仍是一步，与拖动、旋转的记法完全一致
+// 浮动文本跟着一起翻：它没有落位那一刻，所以文本那半在本函数末尾当场记一步（与拖动结束时同一套做法）
+// 文本翻的是整块外框的位置，字本身仍正着读：把字形镜像过来就没法读了
+// 返回 true 表示这次按键已经由选区接手；没有任何东西选中时返回 false，交给调用方收场
+function mirrorSelection(axis) {
+  // 上一段公转还在飞就先落位：镜像要按定下来的位置算中线，否则中线是按动画中途的姿态算的
+  if (orbitActive) finishOrbit();
+  let hasElement = false;
+  for (let i = 0; i < elements.length; i++) {
+    if (elements[i].selected && !elements[i].deleting) { hasElement = true; break; }
+  }
+  let hasText = false;
+  for (let i = 0; i < texts.length; i++) {
+    if (texts[i].selected) { hasText = true; break; }
+  }
+  if (!hasElement && !hasText) return false;
+  const line = mirrorLineWorld(axis, hasElement);
+  const table = axis === "h" ? MIRROR_DIR_H : MIRROR_DIR_V;
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el.selected || el.deleting) continue;
+    // 位置照中线翻：照的是格心，中点又是整数或半整数，所以翻完仍是格心
+    const oldWx = el.wx, oldWy = el.wy;   // 改坐标之前先记下旧格号，格子索引要按新旧两个格号摘挂
+    if (axis === "h") el.wx = line * 2 - el.wx;
+    else el.wy = line * 2 - el.wy;
+    reindexElement(el, oldWx, oldWy);     // 翻完换了格，格子索引跟着一起挪
+    // 朝向与角度一起换成翻过之后的那个方向，角度直接落到位，不走旋转动画：
+    // 镜像不是旋转，让它顺着弧线转过去反而是在说「转了半圈」（形状一样、摆法不同的一格，二者不是一回事）
+    // 当前朝向从目标角度换算，不直接读 el.dir：旋转动画还没停下时 el.dir 仍停在旧方向上，
+    // 那一刻按 H/V 会照旧方向去翻，翻出来是错的（存档那边也是这么换算的，见 scene.js 的 elementToRecord）
+    const cur = ((Math.round(el.angleTarget / 90) % 4) + 4) % 4;
+    const dir = table[cur];
+    el.dir = dir;
+    el.angle = dir * 90;
+    el.angleTarget = el.angle;
+    el.mvOffU = 0;   // 拖动缓动的残留一并归零，否则翻完还会朝着拖动时的方向偏一点
+    el.mvOffV = 0;
+  }
+  for (let i = 0; i < texts.length; i++) {
+    const tx = texts[i];
+    if (!tx.selected) continue;
+    const m = textBlockMetrics(tx);
+    if (axis === "h") tx.wx = line * 2 - (tx.wx + m.w / state.scale);
+    else tx.wy = line * 2 - (tx.wy + m.h / state.scale);
+    tx.mvOffU = 0;
+    tx.mvOffV = 0;
+  }
+  // 选区自己的朝向：左右镜像把「上」留在上，朝向不变；上下镜像把整批的上翻成了下，朝向要跟着走两位，
+  // 这样接着按 WASD 仍是「相对这批自己的上要转多少」，与镜像之前的手感一致
+  if (hasElement && axis === "v") selOrientDir = (selOrientDir + 2) % 4;
+  rayGraph.dirty = true;   // 位置与朝向都变了，谁挡谁与激光场要按新摆法重算
+  sceneDirty = true;
+  commitHistory();   // 文本那一半的位置变化在这里当场记账；元件那半还在悬空，这次提交不会记它
+  return true;
+}
+
 // 用 WASD 把指针悬停的那个元件转到按下的方向：没有选区时的第二顺位
 // 与虚影共用同一套「最短路径」算法：元件自带朝向，只拨到目标朝向，不顺着累积角度绕远路
 // 转完立刻记一步：悬停旋转是就地生效的改动，不像选区那样「悬空」，不记的话撤销会跳过它去撤更早的动作
@@ -337,6 +540,9 @@ function rotateHoveredElement(dirKey) {
   const next = el.angleTarget + shortestTurnTo(el.angleTarget, dirKey * 90);
   if (next === el.angleTarget) return true;  // 已经朝着这个方向：不做动作，但也不能再落到虚影上
   el.angleTarget = next;
+  // 开始转之前也让缓存位图重画一次：位图里存的是它转之前的朝向，而转的过程中它改由叠加层画，
+  // 不重画的话旧朝向那张会一直留在原位，看上去像两个元件叠在一起
+  invalidateElementCache();
   commitHistory();  // 朝向是电路的一部分（决定激光往哪边走），转一下就该占一步历史
   sceneDirty = true;  // 角度目标变了，即使画面此刻静止也要重绘一帧把旋转动画推起来
   return true;
@@ -360,8 +566,10 @@ function finishOrbit() {
     if (el.orbitU0 === null) continue;
     // 落点先按精确位置算，再吸附回最近的格心：轴心在半格上时这一步会把整批平移半格
     const p = orbitPoint(el.orbitU0, el.orbitV0, total);
+    const oldWx = el.wx, oldWy = el.wy;   // 改坐标之前先记下旧格号，格子索引要按新旧两个格号摘挂
     el.wx = Math.round(p.u) + 0.5;
     el.wy = Math.round(p.v) + 0.5;
+    reindexElement(el, oldWx, oldWy);     // 转完之后它多半换了格，格子索引跟着一起挪
     el.angle = el.orbitAngle0 + total;
     el.angleTarget = el.angle;
     el.dir = ((Math.round(el.angle / 90) % 4) + 4) % 4;  // 离散朝向跟着落位角度走，激光逻辑读的是它
@@ -374,6 +582,9 @@ function finishOrbit() {
   orbitP = 0;
   orbitTurns = 0;
   rayGraph.dirty = true;  // 位置与朝向都变了，阻挡图和激光场必须重算
+  // 公转途中这批元件一直在叠加层上走，缓存位图里留的是它们的旧位置；落位后必须整张重画，
+  // 否则旧位置会留下残影、新位置又什么都没有
+  invalidateElementCache();
   sceneDirty = true;
 }
 

@@ -19,8 +19,58 @@ function setDebugPanelVisible(visible) {
 window.debugPanel = {
   show: function () { setDebugPanelVisible(true); },
   hide: function () { setDebugPanelVisible(false); },
-  toggle: function () { setDebugPanelVisible(!debugPanelVisible); }
+  toggle: function () { setDebugPanelVisible(!debugPanelVisible); },
+  // 压力测试入口：一键铺满指定数量的元件，用来验证十万级规模下的帧率与交互
+  // 用法：控制台执行 debugPanel.stress() 生成十万个，或 debugPanel.stress(200000) 指定数量
+  stress: function (count) { runStressTest(count); }
 };
+
+// 逐层开关的对外入口：改完自动标脏，下一帧就按新开关重画
+// 用法：perfLayers.set("lampGlow", true) 关掉灯光晕，改成 false 恢复
+window.perfLayers = {
+  skip: renderSkip,
+  set: function (layer, on) { renderSkip[layer] = on; sceneDirty = true; }
+};
+
+/* ========== 压力测试 ========== */
+
+// 元件类型轮转表：五种形状都摆出来，顺便让结算层真的有一批光源与门在动
+const STRESS_TYPES = ["transmitter", "deflector", "inverter", "light", "lamp"];
+
+// 一键生成大批元件：整批直写元件表，只在收尾重建一次索引、阻挡图与视野
+// 为什么不逐个走正常放置流程：那样每放一个就记一步历史、标一次脏，十万次叠加起来光记账就卡死了
+// 这里只调 placeElement 建数据（它本身只挂索引、置脏，不做别的），建完统一收口，开销集中在一次全表重建上
+function runStressTest(count) {
+  const n = Math.max(1, Math.floor(count || 100000));
+  clearScene();   // 先清干净：压力测试要从一张空图起算，否则旧元件会与新阵列挤在同一格里
+  const side = Math.ceil(Math.sqrt(n));   // 摆成正方阵，边长取平方根向上取整
+  const half = Math.floor(side / 2);      // 阵列中心对齐世界原点，居中视野正好落在阵心
+  for (let i = 0; i < n; i++) {
+    const gx = (i % side) - half;          // 列号：逐行铺满，行内从左到右
+    const gy = Math.floor(i / side) - half; // 行号：屏幕 Y 向下、世界 Y 向上，这里只是摆位，正负无关紧要
+    const el = placeElement(gx + 0.5, gy + 0.5, i % 4, STRESS_TYPES[i % STRESS_TYPES.length]);
+    el.on = (i % 997) === 0;   // 极少数光源打开：让结算层有链在传，又不至于把帧率读数整个盖住
+  }
+  rebuildCellIndex();    // 批量直写期间已逐条挂过索引，这里整张重建一次，保证与元件表完全对齐
+  resetSimBuffers();     // 元件下标整批换过了，按旧下标存的发射表与接收表必须作废
+  rayGraph.dirty = true; // 阻挡图留给下一微帧重建一趟，十万条也只重建这一次
+  invalidateElementCache();  // 元件缓存位图整张作废，下一帧按新场景重画
+  // 视野一步调到「整片阵列刚好装进视口」：不调的话默认缩放只看得到阵心一小块，看不出规模
+  const vp = getViewport();
+  const fit = Math.min(vp.w / side, vp.h / side) * 0.95;   // 留 5% 余量，边缘那圈元件不会被视口切掉
+  const scale = Math.min(CONFIG.maxScale, Math.max(CONFIG.minScale, fit));  // 夹在缩放上下限内，与滚轮那一套保持一致
+  state.scale = scale;
+  state.logScale = Math.log(scale);
+  state.tLogScale = state.logScale;   // 目标与当前相等：视野直接到位，不走平移动画
+  state.anchorWX = 0;                 // 参考点取世界原点，也就是阵列中心
+  state.anchorWY = 0;
+  state.anchorSX = vp.x + vp.w / 2;   // 参考点的屏幕位置取视口正中，横向基准要用视口左边而不是窗口左边
+  state.anchorSY = vp.y + vp.h / 2;
+  state.tAnchorSX = state.anchorSX;   // 目标与当前相等，不产生平移动画
+  state.tAnchorSY = state.anchorSY;
+  sceneDirty = true;  // 强制下一帧重绘，否则静止判定可能直接跳过这一帧
+  console.log("[压力测试] 已生成 " + n + " 个元件，阵列 " + side + " × " + side + " 格，缩放 " + scale.toFixed(2));
+}
 
 // 底板配色的 HSL 编辑器入口：唤出的就是上面这个调试面板，底板那组滑块在里面
 // 单开一个入口是因为底板色属于界面而不是元件，调用点上写 panelColor.show() 比 debugPanel.show() 更明确
