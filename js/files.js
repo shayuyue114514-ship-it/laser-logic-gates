@@ -26,10 +26,11 @@ async function resumePendingScene() {
     raw = JSON.parse(text);
   } catch (err) {
     console.log("[文件] 从首页带来的内容不是合法 JSON，已忽略");
+    showToast("首页带来的文件不是本程序的存档，已忽略");
     return;
   }
   const parsed = parseScene(raw);
-  if (!parsed.ok) { console.log("[文件] 从首页带来的存档不可用：" + parsed.reason); return; }
+  if (!parsed.ok) { console.log("[文件] 从首页带来的存档不可用：" + parsed.reason); showToast("存档无法打开：" + parsed.reason); return; }
   applyScene(parsed);
   // 句柄：首页已经把它写进同一个库、同一个键，上一句读完的 lastPickerHandle 就是刚选的那个文件
   // 这里把它接成「当前文件」，之后点保存仍然直接写回原文件，不必再去选一次
@@ -45,7 +46,7 @@ async function resumePendingScene() {
 // 打开：选一个存档读进画面
 // 顺序是「先全部读完并校验通过，再动画面」：任何一步失败都原样返回，正在编的电路不会被毁掉
 async function onOpenFile() {
-  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); return; }
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); showToast("当前浏览器不支持读取本地文件"); return; }
   let handle;
   try {
     // 打开框不带类型过滤：过滤规则由系统按文件类型判定，曾出现本程序后缀的文件在框里选不到的情形
@@ -54,7 +55,7 @@ async function onOpenFile() {
     handle = handles[0];   // 只允许选一个，返回的数组里必定有且只有一项
   } catch (err) {
     // 取消同样不是错误，静默收场
-    if (err.name !== "AbortError") console.log("[文件] 打开框出错：", err);
+    if (err.name !== "AbortError") { console.log("[文件] 打开框出错：", err); showToast("打开文件失败，请重试"); }
     return;
   }
   rememberPickerHandle(handle);  // 记住这次所在的目录，下次打开框直接从这儿起步
@@ -73,7 +74,7 @@ function stashCurrentScene() {
 // 一份已经校验过的存档落到画面上，并把「当前文件」绑到它的句柄上，成功返回 true
 // 「从磁盘读出来再打开」与「把这次会话里存下的那份改动摆回来」两条路共用它，收尾才不会各写一套
 function adoptScene(handle, parsed) {
-  if (!parsed.ok) { console.log("[文件] " + handle.name + "：" + parsed.reason); return false; }
+  if (!parsed.ok) { console.log("[文件] " + handle.name + "：" + parsed.reason); showToast("「" + handle.name + "」无法打开：" + parsed.reason); return false; }
   applyScene(parsed);
   // 确认用上了才改绑定：读失败时「当前文件」仍指向原来那个，不会显示成刚选的坏文件
   S.currentFileHandle = handle;
@@ -94,6 +95,7 @@ async function openFromHandle(handle) {
     text = await file.text();
   } catch (err) {
     console.log("[文件] 读取 " + handle.name + " 失败：", err);
+    showToast("读取「" + handle.name + "」失败，请重试");
     return false;
   }
   let raw;
@@ -101,6 +103,7 @@ async function openFromHandle(handle) {
     raw = JSON.parse(text);
   } catch (err) {
     console.log("[文件] " + handle.name + " 不是本程序的存档：内容不是合法的 JSON");
+    showToast("「" + handle.name + "」不是本程序的存档");
     return false;
   }
   return adoptScene(handle, parseScene(raw));
@@ -108,7 +111,7 @@ async function openFromHandle(handle) {
 
 // 另存为：弹保存框挑一个新文件，把当前电路写进去，并把它记为当前文件
 async function onSaveFileAs() {
-  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); return; }
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); showToast("当前浏览器不支持写入本地文件"); return; }
   // 悬空的元件不进存档：这时存出去会得到一份少了这批元件的文件，先拦下并提示用户落位
   if (selectionHeld()) { showToast("选区尚未落位，无法保存"); return; }
   let handle;
@@ -120,7 +123,7 @@ async function onSaveFileAs() {
     }, startInOption()));
   } catch (err) {
     // 用户按取消不是错误，静默收场；其它错误才报出来，免得一次取消就弹一堆提示
-    if (err.name !== "AbortError") console.log("[文件] 保存框出错：", err);
+    if (err.name !== "AbortError") { console.log("[文件] 保存框出错：", err); showToast("保存文件失败，请重试"); }
     return;
   }
   console.log("[文件] 保存框用时 " + Math.round(performance.now() - t0) + " ms");
@@ -204,6 +207,7 @@ async function writeCurrentFile() {
   try {
     if (!(await ensureWritePermission(S.currentFileHandle))) {
       console.log("[文件] 没有写权限，本次保存放弃");
+      showToast("没有写入权限，本次保存已放弃");
       return false;
     }
     stream = await S.currentFileHandle.createWritable();
@@ -224,6 +228,7 @@ async function writeCurrentFile() {
       console.log("[文件] 收尾完成：" + Math.round(performance.now() - t2) + " ms");
     }).catch(function (err) {
       console.log("[文件] 收尾失败，文件没有换成新的：", err);
+      showToast("文件没有写完，请重新保存");
       S.docDirty = true;   // 圆点会按这个标记在下一帧重新亮起，syncSidebarDirty 每帧都会对照
     }).finally(function () {
       pendingCommit = null;
@@ -232,6 +237,7 @@ async function writeCurrentFile() {
     return true;
   } catch (err) {
     console.log("[文件] 写入失败：", err);
+    showToast("保存失败，请重试");
     return false;
   } finally {
     if (stream !== null) {
@@ -296,7 +302,7 @@ function addRecordsAsSelection(records, targetCX, targetCY) {
 // 与「打开」的区别：不替换当前画面，也不改「当前文件」的绑定，只是往现有电路上再添一批元件
 // 落点规则：整批保持相对位置不变，把这一批的包围盒中心挪到当前视野中央
 async function onImportSelection() {
-  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); return; }
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接读文件"); showToast("当前浏览器不支持读取本地文件"); return; }
   let handle;
   try {
     // 导入框与打开框同一条规矩：不传 types，避免系统按类型过滤把本程序的文件挡在外面
@@ -304,7 +310,7 @@ async function onImportSelection() {
     handle = handles[0];   // 只允许选一个，返回的数组里必定有且只有一项
   } catch (err) {
     // 取消同样不是错误，静默收场
-    if (err.name !== "AbortError") console.log("[文件] 导入框出错：", err);
+    if (err.name !== "AbortError") { console.log("[文件] 导入框出错：", err); showToast("打开文件失败，请重试"); }
     return;
   }
   rememberPickerHandle(handle);  // 记住这次所在的目录，下次导入框直接从这儿起步
@@ -314,6 +320,7 @@ async function onImportSelection() {
     text = await file.text();
   } catch (err) {
     console.log("[文件] 读取失败：", err);
+    showToast("读取「" + handle.name + "」失败，请重试");
     return;
   }
   let raw;
@@ -321,24 +328,26 @@ async function onImportSelection() {
     raw = JSON.parse(text);
   } catch (err) {
     console.log("[文件] 不是本程序的存档：内容不是合法的 JSON");
+    showToast("「" + handle.name + "」不是本程序的存档");
     return;
   }
   const parsed = parseScene(raw);
-  if (!parsed.ok) { console.log("[文件] " + parsed.reason); return; }   // 整份不可用就整个放弃
-  if (parsed.elements.length === 0) { console.log("[文件] " + handle.name + " 里没有可导入的元件"); return; }
+  if (!parsed.ok) { console.log("[文件] " + parsed.reason); showToast("「" + handle.name + "」无法导入：" + parsed.reason); return; }   // 整份不可用就整个放弃
+  if (parsed.elements.length === 0) { console.log("[文件] " + handle.name + " 里没有可导入的元件"); showToast("「" + handle.name + "」里没有可导入的元件"); return; }
 
   const target = viewCenterCell();
   const n = addRecordsAsSelection(parsed.elements, target.cx, target.cy);
   console.log("[文件] 已从 " + handle.name + " 导入 " + n + " 个元件作为选区" +
     (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
+  showToast("已导入 " + n + " 个元件作为选区");
 }
 
 // 以选区导出：把当前选区单独存成一个存档文件，结构与整份存档一致，只是不含视野
 // 与「另存为」的区别：导出的是一份新文件，不替换画面、也不改「当前文件」的绑定，当前编辑的还是原来那个
 async function onExportSelection() {
   const payload = serializeSelection();
-  if (payload.elements.length === 0) { console.log("[文件] 没有选区，没东西可导出"); return; }
-  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); return; }
+  if (payload.elements.length === 0) { console.log("[文件] 没有选区，没东西可导出"); showToast("没有选区，没东西可导出"); return; }
+  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); showToast("当前浏览器不支持写入本地文件"); return; }
   let handle;
   try {
     // 默认名字跟着当前存档走，加个「-选区」后缀，连续导几个不同选区时不会互相覆盖
@@ -349,7 +358,7 @@ async function onExportSelection() {
     }, startInOption()));
   } catch (err) {
     // 用户按取消不是错误，静默收场；其它错误才报出来，免得一次取消就弹一堆提示
-    if (err.name !== "AbortError") console.log("[文件] 保存框出错：", err);
+    if (err.name !== "AbortError") { console.log("[文件] 保存框出错：", err); showToast("导出失败，请重试"); }
     return;
   }
   rememberPickerHandle(handle);  // 记住这次所在的目录，下次导出框直接从这儿起步
@@ -358,8 +367,10 @@ async function onExportSelection() {
     await stream.write(JSON.stringify(payload));  // 与整份存档同样不缩进，两处格式保持一致
     await stream.close();
     console.log("[文件] 已把 " + payload.elements.length + " 个元件导出到 " + handle.name);
+    showToast("已导出 " + payload.elements.length + " 个元件到「" + handle.name + "」");
   } catch (err) {
     console.log("[文件] 写入失败：", err);
+    showToast("导出失败，请重试");
   }
 }
 
@@ -383,13 +394,15 @@ function serializeSelection() {
 // 写剪贴板要用系统的接口，用户按下的那一下就是「用户手势」，浏览器不会拦
 async function copySelection() {
   const payload = serializeSelection();
-  if (payload.elements.length === 0) { console.log("[剪贴板] 没有选区，没东西可复制"); return; }
-  if (!S.canUseClipboard) { console.log("[剪贴板] 当前环境不支持写剪贴板"); return; }
+  if (payload.elements.length === 0) { console.log("[剪贴板] 没有选区，没东西可复制"); showToast("没有选区，没东西可复制"); return; }
+  if (!S.canUseClipboard) { console.log("[剪贴板] 当前环境不支持写剪贴板"); showToast("当前环境不支持写剪贴板"); return; }
   try {
     await navigator.clipboard.writeText(JSON.stringify(payload));  // 不缩进：这份要能原样粘回来，不是给人看的
     console.log("[剪贴板] 已复制 " + payload.elements.length + " 个元件");
+    showToast("已复制 " + payload.elements.length + " 个元件");
   } catch (err) {
     console.log("[剪贴板] 写入失败：", err);
+    showToast("复制失败，请重试");
   }
 }
 
@@ -422,16 +435,18 @@ function serializeSceneText() {
 // 这份只出不进，怎么省字怎么来，用不着迁就读档那一侧
 // 复制的是整份电路而不是选区：给 AI 看电路通常要它看到全貌，只给一半反而看不懂
 async function copyForAi() {
-  if (S.elements.length === 0) { console.log("[AI 文本] 画面上还没有元件，没东西可复制"); return; }
+  if (S.elements.length === 0) { console.log("[AI 文本] 画面上还没有元件，没东西可复制"); showToast("画面上还没有元件"); return; }
   // 与保存同一条规矩：悬空的元件不在这份文本里，这时复制出去会漏掉一批元件，先拦下并提示
   if (selectionHeld()) { showToast("选区尚未落位，无法复制"); return; }
-  if (!S.canUseClipboard) { console.log("[AI 文本] 当前环境不支持写剪贴板"); return; }
+  if (!S.canUseClipboard) { console.log("[AI 文本] 当前环境不支持写剪贴板"); showToast("当前环境不支持写剪贴板"); return; }
   const text = serializeSceneText();
   try {
     await navigator.clipboard.writeText(text);
     console.log("[AI 文本] 已复制当前电路，" + text.length + " 字符");
+    showToast("已复制给 AI 的电路文本");
   } catch (err) {
     console.log("[AI 文本] 写入失败：", err);
+    showToast("复制失败，请重试");
   }
 }
 
@@ -454,7 +469,7 @@ function onPaste(e) {
   }
   const parsed = parseScene(raw);
   if (!parsed.ok) { console.log("[剪贴板] " + parsed.reason + "，已忽略"); return; }
-  if (parsed.elements.length === 0) { console.log("[剪贴板] 剪贴板里没有可粘贴的元件"); return; }
+  if (parsed.elements.length === 0) { console.log("[剪贴板] 剪贴板里没有可粘贴的元件"); showToast("剪贴板里没有可粘贴的元件"); return; }
   e.preventDefault();   // 确认要用了才拦默认行为，用不上时留给浏览器自己处理
   // 落点：指针在画布内就以指针所在格为中心，指针不在就退回视野中心
   const target = S.pointerInside
