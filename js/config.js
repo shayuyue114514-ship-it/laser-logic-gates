@@ -4,7 +4,7 @@
 /* ========== 常量配置 ========== */
 
 const CONFIG = {
-  appVersion: "1.0.0-test1",    // 应用版本号：唯一一处定义，首页副标题与离线缓存的版本都以它为准
+  appVersion: "1.0.0.001",    // 应用版本号：唯一一处定义，首页副标题、离线缓存与发布包都以它为准；内部号每次改动末位加一
   gridUnit: 1,            // 网格基本单位：1 个世界单位 = 1 格，也是永远显示的最小格子
   gridLineRatio: 0.03,    // 网格线宽 = 格宽 × 这个比例 + gridLineBase，上限 1 CSS px
   gridLineBase: 0.22,     // 上式里的固定加数（CSS px）：线细到 0.25 px 上下就看不见了，靠它兜住，缩到多小也画得出来
@@ -17,8 +17,8 @@ const CONFIG = {
   rightbarWidth: 40,      // 右侧工具栏的宽度（CSS px）：只放一列小功能图标，做得越细占掉网格越少
   rightToolCount: 24,     // 右侧工具栏里先摆出的方框个数：图标以后再做，先按格子把位置定下来
   // 右侧工具栏每一格的名称：指针停在上面时写在格子左侧；空串表示这一格还没功能，不显示小窗
-  // 下标与格子序号一一对应，第一个是状态槽，第二个是逐微帧推进的「前进一步」，第三个是临时抹掉画面上所有激光
-  rightToolNames: ["运行开关", "前进一步", "清除激光"],
+  // 下标与格子序号一一对应，第一个是状态槽，第二个是逐微帧推进的「前进一步」，第三个是临时抹掉画面上所有激光，第四个是堆叠
+  rightToolNames: ["运行开关", "前进一步", "清除激光", "堆叠", "查找"],
   rightBarTipDelay: 0.5,  // 指针停在工具栏某一格上多久才弹出名称（秒）：扫过一整列时不会一路闪出小窗
   sidebarTipDelay: 0.8,   // 指针停在列表某一条上多久才显示全名小窗（秒）：扫过一排时不会闪出一堆小窗
   sidebarSubmenuDelay: 0.16, // 指针离开菜单后隔多久才收起右侧那一列文件类型（秒）：留出斜着挪进子列表的时间，不然会闪一下
@@ -85,6 +85,29 @@ const CONFIG = {
   tutorialPanelW: 520,          // 教程弹窗宽度（CSS px）：要装下成段的教程文字，比设置弹窗宽得多
   tutorialPanelH: 360,          // 教程弹窗高度（CSS px）：高度定死，文字超出时由里面的内容区自己滚动，窗口不被撑高
   confirmPanelW: 300,           // 确认弹窗宽度（CSS px）：只要装下一句问话和两个按钮，比另外三个弹窗都窄
+  stackPanelWidth: 236,         // 堆叠设置框宽度（CSS px）：装下「堆叠次数」一行文字、数字格与两个步进键
+  stackMaxLayers: 64,           // 堆叠层数上限：防止手滑填个大数一次性铺满整张网格
+  stackDefaultCount: 2,         // 堆叠次数默认值：含原来那一批，所以默认是「原件加一份」
+  stackDefaultDX: 0,            // X 偏移默认值（格）：每多一层就往右挪几格，默认不挪
+  stackDefaultDY: -1,           // Y 偏移默认值（格）：世界 Y 向上为正，取 -1 表示往下一格叠
+  stackPreviewAlpha: 0.3,       // 堆叠虚影的整体透明度：比选中态明显淡，一眼能分出「还没落下」
+  stackPreviewDashOn: 0.16,     // 堆叠虚影描边虚线的实线段长度（世界单位）
+  stackPreviewDashOff: 0.1,     // 堆叠虚影描边虚线的空线段长度（世界单位）
+  // 查找：点右侧工具栏第五格后，在网格视口右上角浮出一个小设置框，按选区里的元件组合在整份电路里找同样的组合
+  searchPanelWidth: 208,        // 查找设置框宽度（CSS px）：一行放得下方式与放大镜，一行放页码与两个箭头
+  searchPanelPad: 8,            // 查找设置框内边距（CSS px）
+  searchPanelRadius: 8,         // 查找设置框圆角半径（CSS px）
+  searchPanelFontSize: 12,      // 查找设置框字号（CSS px）
+  searchPanelInset: 10,         // 查找设置框离视口右上角两条边的距离（CSS px）
+  searchFocusCover: 0.22,       // 定位到某个结果时它最长那边占视口短边的比例：落在 10%~30% 之间
+  searchFlashDuration: 1.6,     // 定位到某个结果时闪两下的总时长（秒）：放慢一档，两下之间有足够空闲，不催人
+  searchMaxResults: 2000,       // 一次最多收多少个结果：极常见的单件组合也不至于把结果表撑爆
+  searchTintBase: 0.45,         // 所有结果里的元件朝橘黄偏的程度：低一档，看得清是橘黄又不抢眼
+  searchTintActive: 0.72,       // 当前定位的那一组：比其余结果再重一档，一眼分得出是哪一组
+  searchFlashExtra: 0.12,       // 闪两下时在当前这一组上额外加的程度：只轻轻起伏，不再把元件一下照白
+  toastHold: 3,                 // 中间提示框停留多久才开始淡出（秒）：到点自己走，不用手点关闭
+  toastFade: 0.3,               // 中间提示框淡出的时长（秒）：读完就干脆退场，不留拖尾
+  toastFontSize: 13,            // 中间提示框的字号（CSS px）：比悬停小窗大一号，是一句要正眼读的话
   minScale: 1,            // 最小缩放：1 世界单位 = 1 CSS px（再小连元件轮廓也落到亚像素上，格子里已没有可看的东西）
   maxScale: 400,          // 最大缩放：1 世界单位 = 400 CSS px
   wheelZoomRate: 0.0015,  // 滚轮 deltaY → 缩放指数的系数
@@ -151,7 +174,8 @@ const CONFIG = {
   speedSliderSteps: 1000,      // 速度滑块的总刻度数：刻度越细，拖动手感越连续
   speedDtMin: 0.02,            // 滑块最左端之外的最小微帧时长（秒）：选 0.02 是为了让滑块中点落在约 0.14 秒，贴近常用的 0.12 秒
   speedDtMax: 1,               // 滑块最右端的微帧时长（秒）：一个微帧要等满 1 秒
-  maxQuiescentSteps: 10000,    // 零延迟时单帧最多结算的微帧数：只防逻辑成环时死循环，正常链路远用不到
+  maxQuiescentSteps: 10000,    // 零延迟时单帧最多结算的微帧数：兜底防死循环；正常情况下先被下面那条时间预算挡住
+  zeroDelayBudgetMs: 10,       // 零延迟时每帧最多花在结算上的毫秒数：按 30 帧的帧预算留出渲染余量，链没跑完就留到下一帧接着跑
   laserWidth: 0.133,           // 激光光芯宽度（世界单位）：随缩放一起变粗变细，1 格 = 1
   laserGlowLayers: 8,          // 辉光层数：用多层同心描边叠出连续衰减，层数越多过渡越平滑
   laserGlowSpread: 3.4,        // 最外层辉光的宽度相对光芯的倍数：越大晕开得越远
@@ -253,9 +277,13 @@ const COLOR = {
   slotBorder: "#29B6F6",  // 选项槽描边：与视口边框同色，整页外框保持一个色系
   slotBorderSelected: "#5FC8F8", // 选中槽描边：比 slotBorder 朝白色提亮约 25%，只亮一点点，和加粗一起构成选中标识
   rightToolFill: "#8AD8FF", // 右侧工具栏方框的填充：与元件槽同色系，略深一档，压在更深的栏底上仍看得出格子
-  iconPlate: "#1E88E5",      // 「清除激光」图标里那块蓝色底板：比工具栏格子深两档，小徽标才立得住
-  iconSymbolFill: "#BDEBFF", // 底板上反相器符号的填充：浅蓝，压在深蓝上对比够
-  iconSymbolStroke: "#0D5C9E", // 反相器符号的描边：再深一档的蓝，缩到 21px 也勾得清轮廓
+  iconClearBeam: "#6BC5FA",  // 清除图标里激光束的外层蓝：取自图标原文件
+  iconClearBeamInner: "#4BBBFB", // 激光束里叠的那条稍深的蓝：两层叠出光束的中芯
+  iconClearSlash: "#F04242", // 划过光束的红色斜杠：全图标唯一的暖色，一眼看出是「清除」
+  iconStackLight: "#45A4ED", // 堆叠图标最上层（绘制顺序第一个，最终压在最下面）：取自图标原文件
+  iconStackMid: "#339CF0",   // 堆叠图标中间那一层
+  iconStackDeep: "#2696F2",  // 堆叠图标最后画的一层，因此盖在最上面
+  iconStackStroke: "#156BC1", // 堆叠图标每一层的描边：深蓝，把三层的轮廓分开
   runIcon: "#1E9E52",     // 状态槽「运行中」的绿色：朝右三角形，在淡蓝底上够深也够亮
   pauseIcon: "#E04A4F",   // 状态槽「已暂停」的红色：两条竖杠，与绿色形成一眼可辨的对照
   stepIcon: "#1E9E52",    // 「前进一步」的绿色：与运行中的三角同色，两者是同一组步进控制
@@ -268,6 +296,17 @@ const COLOR = {
   lampGlow: "#FF8A80",    // 灯被照亮时的光晕：淡红，透明度由亮起进度与峰值一起给
   selectBorder: "#1565C0", // 拉框描边：深蓝，压在淡蓝网格上边界清晰
   selectFill: "rgba(21, 101, 192, 0.14)", // 拉框的填充：同色低透明度，压得住网格又不遮住框里的元件
+  // 查找结果不再在格子上画框：直接把结果里的元件本体染成橘黄，靠颜色本身说话，画面上不多出任何形状
+  // 下面两种颜色只作为「染到多重」时的目标色，实际混合在 RGB 里做，不会绕色环串出别的颜色
+  // 填充取柔和的浅橙、描边取偏深的赭橙，同色系一浅一深，与蓝色的常态色区分得开又不刺眼
+  searchLitFill: { h: 32, s: 92, l: 66 },   // 橘黄填充：相当于 #F7B96B，压住深色描边，不脏也不荧光
+  searchLitStroke: { h: 26, s: 76, l: 44 }, // 橘黄描边：相当于 #C47A22，比填充深一档，轮廓依旧清楚
+  // 当前定位的那一组再往饱和里走一点：仍是橘黄一族，只是更实在，与其余结果分得开
+  searchLitActiveFill: { h: 30, s: 96, l: 60 },   // 定位组的填充：更饱和的橙
+  searchLitActiveStroke: { h: 24, s: 88, l: 38 }, // 定位组的描边：更深一档，轮廓更实
+  // 闪两下时朝浅橙走：只在橘黄族内提亮，不会和蓝色底色混成一锅灰
+  searchLitFlashFill: { h: 34, s: 94, l: 72 },    // 闪光峰值时的填充：只比常态亮一小截，不照成白
+  searchLitFlashStroke: { h: 27, s: 86, l: 45 },  // 闪光峰值时的描边：跟着提亮但仍比填充深
   hintText: "#0D47A1",    // 底栏提示文字：深蓝，压在淡蓝底板上读得清，且与整页仍是同一色系
   // 画布上标签与文本块的字色：近黑但不是纯黑（纯黑压在浅蓝上会显得生硬、也容易被读成没调过的默认值）
   // 往蓝偏一点点（约 hsl(214, 26%, 14%)），与整页的蓝色系同源，压在最浅那档蓝底上仍然很清楚
@@ -306,7 +345,13 @@ const RGB = {
   lampFill: hslToRgb(lampLitHSL.fill),
   lampStroke: hslToRgb(lampLitHSL.stroke),
   selectFill: hslToRgb(selectLitHSL.fill),
-  selectStroke: hslToRgb(selectLitHSL.stroke)
+  selectStroke: hslToRgb(selectLitHSL.stroke),
+  searchFill: hslToRgb(COLOR.searchLitFill),    // 查找高亮的填充目标色：与其它端点一样先换算好，混合时只做乘加
+  searchStroke: hslToRgb(COLOR.searchLitStroke), // 查找高亮的描边目标色
+  searchActiveFill: hslToRgb(COLOR.searchLitActiveFill),    // 当前定位那一组的填充
+  searchActiveStroke: hslToRgb(COLOR.searchLitActiveStroke), // 当前定位那一组的描边
+  searchFlashFill: hslToRgb(COLOR.searchLitFlashFill),      // 闪光峰值时的填充
+  searchFlashStroke: hslToRgb(COLOR.searchLitFlashStroke)   // 闪光峰值时的描边
 };
 
 // 调试面板里元件那两组滑块的取色沙盒：初值从上面的实际配色拷一份，面板一打开显示的就是当前颜色
