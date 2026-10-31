@@ -11,6 +11,7 @@ let teStateDom = null;   // HTMLElement|null：标题栏右边的「未保存 / 
 let emptyDom = null;     // HTMLElement|null：未打开任何文件时盖在网格区上的空白层
 let teHandle = null;     // FileSystemFileHandle|null：当前编辑的文件句柄，null 表示没打开
 let teName = "";         // string：当前文件名（带后缀），只用来显示
+let teNode = null;       // object|null：这个文件在左侧列表里的那一行，用来把未保存状态标成与 .lccas 一样的圆点
 let teDirty = false;     // boolean：正文自打开后有没有改过，决定切换视图时要不要先问一句
 let teSaving = false;    // boolean：是否正在写盘，防止连按保存排出两趟
 let viewMode = "none";   // string：网格区现在显示什么，"none" 空白、"scene" 电路、"text" 文本
@@ -32,7 +33,12 @@ function initTextEditorDom() {
     if (e.target.classList.contains("btn")) e.preventDefault();
   });
   teArea.addEventListener("input", function () {
-    if (!teDirty) { teDirty = true; refreshTextEditorHead(); }
+    if (!teDirty) {
+      teDirty = true;
+      refreshTextEditorHead();
+      // 列表圆点与电路用同一套：改过就亮起，不必等写盘
+      if (teNode !== null) { teNode.dirty = true; paintSidebarDot(teNode); }
+    }
   });
   // 正文区的快捷键：Cmd/Ctrl+S 存盘，Esc 回到「未打开任何文件」的空状态
   // 全局键盘处理在识别到文本框时整段让路，所以这两个键必须在这里自己接
@@ -92,7 +98,7 @@ function showTextEditorView() {
 
 // 双击一个文本文件：读原文、摆上编辑器，然后把焦点交给正文区
 // 读失败就只提示、不打开，免得让人对着一个空编辑器以为文件本来就是空的
-async function openTextEditor(handle, name) {
+async function openTextEditor(handle, name, node) {
   if (teDom === null) return;
   if (teDom.style.display !== "none") {
     if (teHandle === handle) { teArea.focus(); return; }
@@ -110,6 +116,7 @@ async function openTextEditor(handle, name) {
   }
   teHandle = handle;
   teName = name;
+  teNode = (node === undefined) ? null : node;   // 从列表打开的才有圆点可标；从别处打开就传空
   teDirty = false;
   teSaving = false;
   teArea.value = text;
@@ -123,6 +130,9 @@ async function openTextEditor(handle, name) {
 // 收起编辑器：只改显示状态，文件本身不动
 function hideTextEditor() {
   teDom.style.display = "none";
+  // 收起时把列表圆点也一并灭掉：这一步只会发生在确认丢弃改动之后
+  if (teNode !== null) { teNode.dirty = false; teNode.saving = false; paintSidebarDot(teNode); }
+  teNode = null;
   teHandle = null;
   teName = "";
   teDirty = false;
@@ -173,6 +183,7 @@ async function saveTextEditor() {
   if (teSaving) return;
   teSaving = true;
   refreshTextEditorHead();
+  if (teNode !== null) setNodeSaving(teNode, true);   // 圆点原地呼吸，和存档写盘时一样
   let stream = null;
   try {
     if (!(await ensureWritePermission(teHandle))) {
@@ -186,6 +197,8 @@ async function saveTextEditor() {
     await stream.close();
     stream = null;
     teDirty = false;
+    // 写盘成功，列表圆点与电路一样灭掉
+    if (teNode !== null) { teNode.dirty = false; paintSidebarDot(teNode); }
     console.log("[文本] 已写入 " + teName + "（" + text.length + " 字符）");
     showToast("已保存");
   } catch (err) {
@@ -198,5 +211,6 @@ async function saveTextEditor() {
     }
     teSaving = false;
     refreshTextEditorHead();
+    if (teNode !== null) setNodeSaving(teNode, false);
   }
 }

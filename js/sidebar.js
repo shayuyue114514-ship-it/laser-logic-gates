@@ -461,7 +461,7 @@ async function onSidebarTreeDblClick(e) {
   if (lower.endsWith(TXT_EXT) || lower.endsWith(MD_EXT)) {
     if (teHandle === node.handle && teDom !== null && teDom.style.display !== "none") { teArea.focus(); return; }
     if (!(await leaveTextEditorForSwitch())) return;
-    openTextEditor(node.handle, node.name);
+    openTextEditor(node.handle, node.name, node);
     return;
   }
   if (!lower.endsWith(SAVE_EXT)) {
