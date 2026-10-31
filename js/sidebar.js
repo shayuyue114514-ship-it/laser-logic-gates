@@ -457,7 +457,10 @@ async function onSidebarTreeDblClick(e) {
   if (node.handle === undefined) return;   // 没有磁盘句柄就没有可读的东西，正常流程下不会出现，防一手
   const lower = node.name.toLowerCase();
   // 文本与 Markdown 不当作存档读：直接交给文本编辑器，改完写回同一个文件
+  // 编辑器正开着另一份且有改动时，先问过才能换；同一份再双击就只是把焦点送回去
   if (lower.endsWith(TXT_EXT) || lower.endsWith(MD_EXT)) {
+    if (teHandle === node.handle && teDom !== null && teDom.style.display !== "none") { teArea.focus(); return; }
+    if (!(await leaveTextEditorForSwitch())) return;
     openTextEditor(node.handle, node.name);
     return;
   }
@@ -465,6 +468,8 @@ async function onSidebarTreeDblClick(e) {
     console.log("[列表] " + node.name + " 不是存档，双击不打开");
     return;
   }
+  // 切到画布之前同样先处理掉编辑器里的未保存改动
+  if (!(await leaveTextEditorForSwitch())) return;
   // 就是当前打开的这一条：不必重读，重读反而会把手上没保存的改动抹掉
   if (node === S.openFileNode) return;
   // 先把手上这份画面收进它所属的那一条里，再换文档：不收的话，这份没保存的改动一被顶掉就再也找不回来

@@ -1,38 +1,40 @@
-// text-editor.js：文本编辑器：双击工作区里的 .txt / .md 文件时，把网格区换成一张可编辑的文本纸，直接改原文。
+// text-editor.js：网格视口的三种视图：电路、文本、未打开任何文件。由左侧列表双击哪种文件就切到哪种。
 // 状态只活在本文件里，不掺进电路的状态：打开哪个文件、有没有改动、是否正在写盘，与画布互不影响。
 "use strict";
 
 /* ========== 状态 ========== */
 
-let teDom = null;        // HTMLElement|null：整层编辑器容器，display 为 flex 时表示正开着
+let teDom = null;        // HTMLElement|null：文本编辑器容器，display 为 block 时表示正显示在网格区上
 let teArea = null;       // HTMLTextAreaElement|null：正文输入区
 let teNameDom = null;    // HTMLElement|null：标题栏里的文件名
 let teStateDom = null;   // HTMLElement|null：标题栏右边的「未保存 / 已保存 / 保存中」小字
+let emptyDom = null;     // HTMLElement|null：未打开任何文件时盖在网格区上的空白层
 let teHandle = null;     // FileSystemFileHandle|null：当前编辑的文件句柄，null 表示没打开
 let teName = "";         // string：当前文件名（带后缀），只用来显示
-let teDirty = false;     // boolean：正文自打开后有没有改过，决定关闭时要不要先问一句
+let teDirty = false;     // boolean：正文自打开后有没有改过，决定切换视图时要不要先问一句
 let teSaving = false;    // boolean：是否正在写盘，防止连按保存排出两趟
+let viewMode = "none";   // string：网格区现在显示什么，"none" 空白、"scene" 电路、"text" 文本
 
 /* ========== 建界面 ========== */
 
-// 初始化编辑器：取节点、接按钮和输入事件，只跑一次
+// 初始化编辑器与空白层：取节点、接按钮和输入事件，只跑一次
 // 输入事件与快捷键都挂在正文区上，不开编辑器时它们不会碰到键盘
 function initTextEditorDom() {
   teDom = document.getElementById("textEditor");
   teArea = document.getElementById("textEditorArea");
   teNameDom = document.getElementById("textEditorName");
   teStateDom = document.getElementById("textEditorState");
+  emptyDom = document.getElementById("emptyView");
   teDom.style.display = "none";   // 显式写成 none：后面几处判断靠这个字符串认「开没开」，不能留空值
   document.getElementById("textEditorSave").addEventListener("click", function () { saveTextEditor(); });
-  document.getElementById("textEditorClose").addEventListener("click", function () { requestCloseTextEditor(); });
-  // 按钮按下时不抢焦点：焦点留在正文区，关掉后接着打字不会被按钮截走
+  // 按钮按下时不抢焦点：焦点留在正文区，打下字时不会被按钮截走
   teDom.addEventListener("mousedown", function (e) {
     if (e.target.classList.contains("btn")) e.preventDefault();
   });
   teArea.addEventListener("input", function () {
     if (!teDirty) { teDirty = true; refreshTextEditorHead(); }
   });
-  // 正文区的快捷键：Cmd/Ctrl+S 存盘，Esc 走与关闭按钮同一套「有改动先问一句」的流程
+  // 正文区的快捷键：Cmd/Ctrl+S 存盘，Esc 回到「未打开任何文件」的空状态
   // 全局键盘处理在识别到文本框时整段让路，所以这两个键必须在这里自己接
   teArea.addEventListener("keydown", function (e) {
     if (e.code === "KeyS" && (e.metaKey || e.ctrlKey)) {
@@ -43,10 +45,47 @@ function initTextEditorDom() {
       requestCloseTextEditor();
     }
   });
-  // 窗口尺寸变了，网格视口跟着变：编辑器开着就立刻重新贴合，不跟着变会留出半截网格
-  window.addEventListener("resize", function () {
-    if (teDom.style.display !== "none") placeTextEditor();
-  });
+  // 窗口尺寸变了，网格视口跟着变：哪一层正显示就立刻重新贴合，不跟着变会留出半截网格
+  window.addEventListener("resize", function () { placeOverlays(); });
+  showEmptyView();   // 启动时还没有打开文件，网格区先摆出空白与那行小字
+}
+
+/* ========== 视图切换 ========== */
+
+// 把两张覆盖层都摆到网格视口的位置与大小：与画布的网格区严格重合
+function placeOverlays() {
+  const vp = getViewport();
+  const rects = [[teDom, vp], [emptyDom, vp]];
+  for (let i = 0; i < rects.length; i++) {
+    rects[i][0].style.left = rects[i][1].x + "px";
+    rects[i][0].style.top = rects[i][1].y + "px";
+    rects[i][0].style.width = rects[i][1].w + "px";
+    rects[i][0].style.height = rects[i][1].h + "px";
+  }
+}
+
+// 切到电路：两层覆盖都收起，画布连激光一起露出来
+function showSceneView() {
+  viewMode = "scene";
+  teDom.style.display = "none";
+  emptyDom.style.display = "none";
+}
+
+// 切到空白：收起编辑器，网格区换成白底与「未打开任何文件」那行小字
+function showEmptyView() {
+  viewMode = "none";
+  teDom.style.display = "none";
+  hideTextEditor();
+  placeOverlays();
+  emptyDom.style.display = "flex";
+}
+
+// 切到文本：收起空白层，露出编辑器并重新贴合网格区
+function showTextEditorView() {
+  viewMode = "text";
+  emptyDom.style.display = "none";
+  placeOverlays();
+  teDom.style.display = "block";
 }
 
 /* ========== 开关 ========== */
@@ -75,20 +114,10 @@ async function openTextEditor(handle, name) {
   teSaving = false;
   teArea.value = text;
   refreshTextEditorHead();
-  placeTextEditor();   // 先按当前网格视口摆好，再露出来，避免先闪一下错误尺寸
-  teDom.style.display = "block";
+  showTextEditorView();   // 先摆好再露出来，避免先闪一下错误尺寸
   teArea.focus();
   teArea.setSelectionRange(0, 0);   // 光标落在开头，与打开一份文档的直觉一致
   teArea.scrollTop = 0;
-}
-
-// 把编辑器摆到网格视口的位置与大小：与画布的网格区严格重合，看起来就是网格换成了一张文本纸
-function placeTextEditor() {
-  const vp = getViewport();
-  teDom.style.left = vp.x + "px";
-  teDom.style.top = vp.y + "px";
-  teDom.style.width = vp.w + "px";
-  teDom.style.height = vp.h + "px";
 }
 
 // 收起编辑器：只改显示状态，文件本身不动
@@ -98,10 +127,10 @@ function hideTextEditor() {
   teName = "";
   teDirty = false;
   teSaving = false;
-  teArea.value = "";
+  if (teArea !== null) teArea.value = "";
 }
 
-// 关闭请求：正在写盘时先不关；有未保存的改动就先问一句，确认丢弃才收起
+// 关闭请求：正在写盘时先不关；有未保存的改动就先问一句，确认丢弃才回到空白状态
 async function requestCloseTextEditor() {
   if (teDom === null || teDom.style.display === "none") return;
   if (teSaving) { showToast("正在保存，请稍候"); return; }
@@ -110,6 +139,20 @@ async function requestCloseTextEditor() {
     if (!discard) return;
   }
   hideTextEditor();
+  showEmptyView();
+}
+
+// 切换到别的文件之前先问一句：编辑器正开着且有改动时，问过才允许切走
+// 返回 true 表示可以继续切；返回 false 时保持原样，调用方直接收手
+async function leaveTextEditorForSwitch() {
+  if (teDom === null || teDom.style.display === "none") return true;
+  if (teSaving) { showToast("正在保存，请稍候"); return false; }
+  if (!teDirty) { hideTextEditor(); return true; }
+  const ok = await askConfirm("这份文本还有未保存的改动，切换后会丢失，确定离开吗？", "离开");
+  if (!ok) return false;
+  teDirty = false;
+  hideTextEditor();
+  return true;
 }
 
 /* ========== 标题栏 ========== */

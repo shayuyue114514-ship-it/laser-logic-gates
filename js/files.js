@@ -27,6 +27,7 @@ async function resumePendingScene() {
   const parsed = parseScene(raw);
   if (!parsed.ok) { console.log("[文件] 从首页带来的存档不可用：" + parsed.reason); showToast("存档无法打开：" + parsed.reason); return; }
   applyScene(parsed);
+  showSceneView();   // 从首页接过来的存档也算打开了文件，网格区切成画布
   // 句柄：首页已经把它写进同一个库、同一个键，上一句读完的 lastPickerHandle 就是刚选的那个文件
   // 这里把它接成「当前文件」，之后点保存仍然直接写回原文件，不必再去选一次
   if (lastPickerHandle !== null) {
@@ -73,6 +74,7 @@ function adoptScene(handle, parsed) {
   // 确认用上了才改绑定：读失败时「当前文件」仍指向原来那个，不会显示成刚选的坏文件
   S.currentFileHandle = handle;
   S.currentFileName = handle.name;
+  showSceneView();   // 存档读进来了，网格区露出画布，把空白层与文本编辑器收起来
   console.log("[文件] 已打开 " + S.currentFileName +
     (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
   return true;

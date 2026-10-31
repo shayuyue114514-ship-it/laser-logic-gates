@@ -1082,6 +1082,20 @@ html, body {
   pointer-events: none;
   user-select: none;
 }
+/* 未打开任何文件时的空白：同样贴着网格视口，白底，中间一行小字 */
+#emptyView {
+  display: none;              /* 默认收起；没有打开文件时由脚本摆出来 */
+  position: fixed;
+  z-index: 3;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #29B6F6;
+  background: #FFFFFF;
+  color: #7FA8C4;
+  font-size: 13px;
+  user-select: none;
+}
 /* 文本编辑器：双击 .txt / .md 时占据网格视口的位置，直接把网格盖住，四周的面板与竖栏照常留着 */
 #textEditor {
   display: none;              /* 默认收起；打开时由脚本改成 block，并摆到网格视口的大小 */
@@ -1147,10 +1161,6 @@ html, body {
 }
 #textEditor .te-head .btn:hover { background: rgba(255, 255, 255, 0.75); }
 #textEditor .te-head .btn:active { background: rgba(255, 255, 255, 1); }
-#textEditor .te-head .btn.icon {
-  width: 30px;
-  padding: 0;
-}
 /* 正文区：白底等宽字体，占满网格剩余的上下空间，只允许上下滚动 */
 #textEditor textarea {
   flex: 1;

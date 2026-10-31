@@ -185,7 +185,10 @@
   </div>
 </div>
 
-<!-- 文本编辑器：双击工作区里的 .txt / .md 文件时盖在整页上，直接改原文
+<!-- 未打开任何文件时的空白：盖住网格区，中间一行小字说明此刻还没有打开文件 -->
+<div id="emptyView"><span>未打开任何文件</span></div>
+
+<!-- 文本编辑器：双击工作区里的 .txt / .md 文件时占据网格区，直接改原文
      标题栏写文件名与保存状态，正文区就是纯文本；Cmd+S 与「保存」按钮都写回原文件
      关闭前若还有改动会先问一句，不会不声不响地把改动丢掉 -->
 <div id="textEditor">
@@ -194,12 +197,6 @@
       <span class="te-name" id="textEditorName"></span>
       <span class="te-state" id="textEditorState"></span>
       <button class="btn" id="textEditorSave" type="button">保存</button>
-      <button class="btn icon" id="textEditorClose" type="button" aria-label="关闭编辑器">
-        <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true" focusable="false">
-          <path d="M5.5 5.5 L12.5 12.5 M12.5 5.5 L5.5 12.5"
-                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-        </svg>
-      </button>
     </div>
     <textarea id="textEditorArea" spellcheck="false"></textarea>
   </div>
