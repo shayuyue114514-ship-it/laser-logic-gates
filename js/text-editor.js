@@ -1,4 +1,4 @@
-// text-editor.js：提醒文本编辑器：双击工作区里的 .txt / .md 文件时盖一层编辑器，直接改原文。
+// text-editor.js：文本编辑器：双击工作区里的 .txt / .md 文件时，把网格区换成一张可编辑的文本纸，直接改原文。
 // 状态只活在本文件里，不掺进电路的状态：打开哪个文件、有没有改动、是否正在写盘，与画布互不影响。
 "use strict";
 
@@ -22,6 +22,7 @@ function initTextEditorDom() {
   teArea = document.getElementById("textEditorArea");
   teNameDom = document.getElementById("textEditorName");
   teStateDom = document.getElementById("textEditorState");
+  teDom.style.display = "none";   // 显式写成 none：后面几处判断靠这个字符串认「开没开」，不能留空值
   document.getElementById("textEditorSave").addEventListener("click", function () { saveTextEditor(); });
   document.getElementById("textEditorClose").addEventListener("click", function () { requestCloseTextEditor(); });
   // 按钮按下时不抢焦点：焦点留在正文区，关掉后接着打字不会被按钮截走
@@ -42,6 +43,10 @@ function initTextEditorDom() {
       requestCloseTextEditor();
     }
   });
+  // 窗口尺寸变了，网格视口跟着变：编辑器开着就立刻重新贴合，不跟着变会留出半截网格
+  window.addEventListener("resize", function () {
+    if (teDom.style.display !== "none") placeTextEditor();
+  });
 }
 
 /* ========== 开关 ========== */
@@ -50,7 +55,7 @@ function initTextEditorDom() {
 // 读失败就只提示、不打开，免得让人对着一个空编辑器以为文件本来就是空的
 async function openTextEditor(handle, name) {
   if (teDom === null) return;
-  if (teDom.style.display === "flex") {
+  if (teDom.style.display !== "none") {
     if (teHandle === handle) { teArea.focus(); return; }
     showToast("请先关闭当前文本编辑器");
     return;
@@ -70,10 +75,20 @@ async function openTextEditor(handle, name) {
   teSaving = false;
   teArea.value = text;
   refreshTextEditorHead();
-  teDom.style.display = "flex";
+  placeTextEditor();   // 先按当前网格视口摆好，再露出来，避免先闪一下错误尺寸
+  teDom.style.display = "block";
   teArea.focus();
   teArea.setSelectionRange(0, 0);   // 光标落在开头，与打开一份文档的直觉一致
   teArea.scrollTop = 0;
+}
+
+// 把编辑器摆到网格视口的位置与大小：与画布的网格区严格重合，看起来就是网格换成了一张文本纸
+function placeTextEditor() {
+  const vp = getViewport();
+  teDom.style.left = vp.x + "px";
+  teDom.style.top = vp.y + "px";
+  teDom.style.width = vp.w + "px";
+  teDom.style.height = vp.h + "px";
 }
 
 // 收起编辑器：只改显示状态，文件本身不动
@@ -88,7 +103,7 @@ function hideTextEditor() {
 
 // 关闭请求：正在写盘时先不关；有未保存的改动就先问一句，确认丢弃才收起
 async function requestCloseTextEditor() {
-  if (teDom === null || teDom.style.display !== "flex") return;
+  if (teDom === null || teDom.style.display === "none") return;
   if (teSaving) { showToast("正在保存，请稍候"); return; }
   if (teDirty) {
     const discard = await askConfirm("这份文本还有未保存的改动，确定关闭吗？");
@@ -110,7 +125,7 @@ function refreshTextEditorHead() {
 // 把正文写回文件：先确认写权限，再开写流一次性写完整份文本
 // 文本文件都很小，不必像存档那样把收尾放到后台；这里等它写完再落「已保存」，结果更直观
 async function saveTextEditor() {
-  if (teDom === null || teDom.style.display !== "flex") return;
+  if (teDom === null || teDom.style.display === "none") return;
   if (teHandle === null) return;
   if (teSaving) return;
   teSaving = true;
