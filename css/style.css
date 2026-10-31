@@ -1082,3 +1082,93 @@ html, body {
   pointer-events: none;
   user-select: none;
 }
+/* 文本编辑器：双击 .txt / .md 时盖在整页上，背后垫一层淡蓝，提示此刻在改文本而不是画面 */
+#textEditor {
+  display: none;              /* 默认收起；打开时由脚本改成 flex */
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 71, 161, 0.16);
+}
+#textEditor .te-card {
+  display: flex;
+  flex-direction: column;
+  width: min(880px, calc(100vw - 64px));
+  height: calc(100vh - 64px);
+  box-sizing: border-box;
+  background: #C4EBFF;
+  border: 2px solid #29B6F6;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(13, 71, 161, 0.20);
+  overflow: hidden;
+}
+#textEditor .te-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 10px 0 16px;
+  box-sizing: border-box;
+}
+#textEditor .te-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0D47A1;
+}
+#textEditor .te-state {
+  flex: none;
+  font-size: 12px;
+  color: #1B6C8F;
+  opacity: 0.85;
+}
+/* 标题栏两个按钮：与项目其它按钮同一套配色、圆角与按下反馈 */
+#textEditor .te-head .btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #29B6F6;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.50);
+  color: #0D47A1;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.16s ease-out;
+}
+#textEditor .te-head .btn:hover { background: rgba(255, 255, 255, 0.75); }
+#textEditor .te-head .btn:active { background: rgba(255, 255, 255, 1); }
+#textEditor .te-head .btn.icon {
+  width: 30px;
+  padding: 0;
+}
+/* 正文区：白底等宽字体，占满卡片剩余高度，只允许上下滚动 */
+#textEditor textarea {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 14px 18px;
+  border: none;
+  border-top: 1px solid #29B6F6;
+  outline: none;
+  resize: none;
+  background: #FFFFFF;
+  color: #0D47A1;
+  font-family: "SFMono-Regular", Menlo, Consolas, "PingFang SC", monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  tab-size: 4;
+}

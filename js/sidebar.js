@@ -447,15 +447,21 @@ async function onSidebarTreeClick(e) {
   buildSidebarTree();
 }
 
-// 双击一条：把那个存档打开
-// 只有后缀是存档后缀的文件才打开，文件夹与别的文件都只是没反应，前者靠单击开合，后者留一句日志说明原因
+// 双击一条：存档交给画布打开，文本文件交给文本编辑器打开
+// 文件夹靠单击开合，别的后缀留一句日志说明原因，不做任何事
 async function onSidebarTreeDblClick(e) {
   const row = e.target.closest(".sb-row");
   if (row === null) return;   // 落在空白处、根目录名或按钮上，都不是「打开一条存档」
   const node = row.sidebarNode;
   if (node === undefined || node.isFolder === true) return;
   if (node.handle === undefined) return;   // 没有磁盘句柄就没有可读的东西，正常流程下不会出现，防一手
-  if (!node.name.toLowerCase().endsWith(SAVE_EXT)) {
+  const lower = node.name.toLowerCase();
+  // 文本与 Markdown 不当作存档读：直接交给文本编辑器，改完写回同一个文件
+  if (lower.endsWith(TXT_EXT) || lower.endsWith(MD_EXT)) {
+    openTextEditor(node.handle, node.name);
+    return;
+  }
+  if (!lower.endsWith(SAVE_EXT)) {
     console.log("[列表] " + node.name + " 不是存档，双击不打开");
     return;
   }

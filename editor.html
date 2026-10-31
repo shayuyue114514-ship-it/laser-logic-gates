@@ -185,6 +185,26 @@
   </div>
 </div>
 
+<!-- 文本编辑器：双击工作区里的 .txt / .md 文件时盖在整页上，直接改原文
+     标题栏写文件名与保存状态，正文区就是纯文本；Cmd+S 与「保存」按钮都写回原文件
+     关闭前若还有改动会先问一句，不会不声不响地把改动丢掉 -->
+<div id="textEditor">
+  <div class="te-card">
+    <div class="te-head">
+      <span class="te-name" id="textEditorName"></span>
+      <span class="te-state" id="textEditorState"></span>
+      <button class="btn" id="textEditorSave" type="button">保存</button>
+      <button class="btn icon" id="textEditorClose" type="button" aria-label="关闭编辑器">
+        <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true" focusable="false">
+          <path d="M5.5 5.5 L12.5 12.5 M12.5 5.5 L5.5 12.5"
+                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+        </svg>
+      </button>
+    </div>
+    <textarea id="textEditorArea" spellcheck="false"></textarea>
+  </div>
+</div>
+
 <!-- 堆叠设置框：点右侧工具栏的「堆叠」后浮在网格正中，跟着地图一起缩放平移
      里面是几行数字与一个开关，改动时画布上实时显示将要叠出来的虚影，确认后才真正落成元件 -->
 <div id="stackPanel" class="popup stackpanel">
@@ -325,6 +345,8 @@
 <script src="js/sidebar-menu.js"></script>
 <script src="js/sidebar-rename.js"></script>
 <script src="js/files.js"></script>
+<!-- 文本编辑器：双击 .txt / .md 时打开，保存走 files.js 里的权限确认 -->
+<script src="js/text-editor.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/slots.js"></script>
 <script src="js/elements.js"></script>
