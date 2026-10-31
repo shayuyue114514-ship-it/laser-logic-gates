@@ -661,17 +661,6 @@ html, body {
   color: #1B6C8F;                /* 深一档的蓝：白底上比正文灰更清楚 */
   font-variant-numeric: tabular-nums;  /* 等宽数字：拖动时数字跳动不会左右晃 */
 }
-/* 文件名：占满行内剩余宽度，超长时从左侧省略，绝不把整行撑破 */
-.popup .fname {
-  flex: 1;
-  min-width: 0;               /* 缺了它，弹性子项不会收缩，省略号永远不会出现 */
-  margin-left: 8px;
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #1B6C8F;
-}
 /* 文件弹窗里的动作项：一行一个，整行都是可点区域 */
 /* 平时不着色也不描边，只在悬停时浮出一层淡蓝——弹窗本身很窄，再并排放三块白底会显得很吵 */
 .popup .btn {

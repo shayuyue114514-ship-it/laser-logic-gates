@@ -1,11 +1,6 @@
 // files.js：文件读写与剪贴板：打开、保存、另存为、选区导入导出、复制粘贴。
 "use strict";
 
-// 把当前文件名写进弹窗：还没存过时用占位名，后缀始终带着，让人知道存出来会叫什么
-function refreshFileName() {
-  S.fileNameDom.textContent = S.currentFileName || ("未命名" + SAVE_EXT);
-}
-
 // 打开句柄库、记住句柄、读回句柄、起始目录这四件事都在 handle-store.js：
 // 它们是编辑器与首页共用的，首页不加载本文件，所以不能留在这里；本文件按名字直接调用即可
 
@@ -37,7 +32,6 @@ async function resumePendingScene() {
   if (lastPickerHandle !== null) {
     S.currentFileHandle = lastPickerHandle;
     S.currentFileName = lastPickerHandle.name;
-    refreshFileName();
   }
   console.log("[文件] 已接着打开 " + (S.currentFileName || "未命名") +
     (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
@@ -79,7 +73,6 @@ function adoptScene(handle, parsed) {
   // 确认用上了才改绑定：读失败时「当前文件」仍指向原来那个，不会显示成刚选的坏文件
   S.currentFileHandle = handle;
   S.currentFileName = handle.name;
-  refreshFileName();
   console.log("[文件] 已打开 " + S.currentFileName +
     (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
   return true;
@@ -131,7 +124,6 @@ async function onSaveFileAs() {
   // 名字和句柄一起记：两者说的都是「现在绑在哪个文件上」，要改就一起改，不能只改一个
   S.currentFileHandle = handle;
   S.currentFileName = handle.name;
-  refreshFileName();
   await runSave();
 }
 

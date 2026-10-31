@@ -273,9 +273,6 @@ const S = {
   sidebarCreateExt: "",  // string：正在新建的文件用哪种后缀，取值来自 NEW_FILE_EXTS；新建文件夹时是空串
   sidebarCreateParent: null,  // Object|null：正在新建的那一层；null 表示根目录，非 null 是某个文件夹节点
   sidebarNewRow: null,  // Object|null：就地输入那一行，形如 {root, input, hint, baseLen}；提交或取消后归 null
-  filePanelDom: document.getElementById("filePanel"),  // HTMLElement：文件弹窗容器，与设置弹窗同款外观
-  fileLitAnim: newEased(0),  // Object：文件按钮的提亮进度标量，0 常态、1 全亮；跟随文件弹窗的开合状态
-  filePanelOpen: false,  // boolean：文件弹窗是否打开；两个弹窗互斥，同时只开一个，避免两块底板叠在一起
   tutorialLitAnim: newEased(0),  // Object：教程按钮的提亮进度标量，0 常态、1 全亮；跟随教程的开合状态
   tutorialOpen: false,  // boolean：教程是否处于打开状态，默认关着；打开时屏幕正中弹出教程窗口
   tutorialPanelDom: document.getElementById("tutorialPanel"),  // HTMLElement：教程弹窗容器，独立于 Canvas 的 DOM 层
@@ -331,13 +328,6 @@ const S = {
   searchFlashOn: false,  // boolean：定位到某个结果后那两下闪光是否还在播
   searchFlashT: 0,  // number：闪光已经播了多少秒
   searchEnabled: false,  // boolean：上一次同步时搜索按钮是否可用，只在状态变化时才去改类名
-  fileNameDom: document.getElementById("fileName"),  // HTMLElement：文件弹窗里显示当前存档名字的那行文字
-  btnOpenDom: document.getElementById("btnOpen"),  // HTMLElement：文件弹窗里的「打开」按钮
-  btnSaveDom: document.getElementById("btnSave"),  // HTMLElement：文件弹窗里的「保存」按钮
-  btnSaveAsDom: document.getElementById("btnSaveAs"),  // HTMLElement：文件弹窗里的「另存为」按钮
-  btnImportSelDom: document.getElementById("btnImportSel"),  // HTMLElement：文件弹窗里的「以选区导入」按钮
-  btnExportSelDom: document.getElementById("btnExportSel"),  // HTMLElement：文件弹窗里的「以选区导出」按钮
-  btnCopyAiDom: document.getElementById("btnCopyAi"),  // HTMLElement：文件弹窗里的「复制给 AI」按钮
   currentFileName: "",  // string：当前存档的文件名（不含路径），空串表示还没存过，显示时用占位名代替
   currentFileHandle: null,  // FileSystemFileHandle | null：当前存档的文件句柄，null 表示还没绑定过文件
   docDirty: false,  // boolean：当前电路有未保存的改动；为真时列表上那一条的名字前面亮一个圆点

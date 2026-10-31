@@ -259,7 +259,6 @@ async function onSidebarMenuDelete() {
     S.openFileNode = null;
     S.docDirty = true;
     S.docEditSeq++;   // 原来绑着的那份文件没了，画面按未保存算，序号也要往前走
-    refreshFileName();
     console.log("[列表] 删掉的正是当前打开的那一个，已解除绑定，画面上的电路按未保存算");
   }
   const level = findSidebarLevel(node);

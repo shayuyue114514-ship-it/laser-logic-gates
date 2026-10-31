@@ -22,7 +22,7 @@ function bindSlotEvents(el, index) {
   });
 }
 
-// 点击一个槽：可选中的槽只改选中项；三个按钮各自开关自己的弹窗，同一时刻只亮一个
+// 点击一个槽：可选中的槽只改选中项；两个按钮各自开关自己的弹窗，同一时刻只亮一个
 // 上一版的点击是在画布上「按下与松开都落在同一槽」才算数，现在由浏览器原生的 click 承担，规则不变
 function onSlotClick(index) {
   // 正在原地编辑文本或改标签时，先按「点到别处就把字收下」处理，与点在画布空白处一致
@@ -32,16 +32,10 @@ function onSlotClick(index) {
     setSelectedSlot(index);
   } else if (index === SETTINGS_SLOT_INDEX) {
     S.settingsOpen = !S.settingsOpen;
-    S.filePanelOpen = false;   // 弹窗互斥：开一个就把另外两个关掉，避免底板叠在一起
-    S.tutorialOpen = false;
-  } else if (index === FILE_SLOT_INDEX) {
-    S.filePanelOpen = !S.filePanelOpen;
-    S.settingsOpen = false;
     S.tutorialOpen = false;
   } else if (index === TUTORIAL_SLOT_INDEX) {
     S.tutorialOpen = !S.tutorialOpen;
     S.settingsOpen = false;
-    S.filePanelOpen = false;
   }
   S.sceneDirty = true;   // 选中高亮与弹窗显隐都变了，静止时也得重绘一帧才看得到
 }
@@ -78,7 +72,6 @@ function updateSlotAnim(dt) {
   }
   // 提亮不参与缩放那套：它是「弹窗开着」的状态显示，不是按下反馈，所以不看悬停与按下
   stepEased(S.settingsLitAnim, S.settingsOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
-  stepEased(S.fileLitAnim, S.filePanelOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
   stepEased(S.tutorialLitAnim, S.tutorialOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);
   // 教程弹窗的淡入淡出与上面这支提亮同源同时长：按钮亮起来的同时窗口淡出来，不会一个先一个后
   stepEased(S.tutorialModalAnim, S.tutorialOpen ? 1 : 0, dt, CONFIG.settingsLitDuration);

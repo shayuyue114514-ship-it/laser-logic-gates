@@ -200,7 +200,6 @@ async function commitSidebarRename(rawName) {
       S.currentFileHandle = newHandle;
       S.currentFileName = name;
       S.openFileNode = node;
-      refreshFileName();
     }
     cancelSidebarRename();
     buildSidebarTree();   // 列表按名字排序，改名之后位置可能变，整棵重画一次最省心

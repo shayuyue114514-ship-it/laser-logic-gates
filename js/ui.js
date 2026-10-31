@@ -429,25 +429,7 @@ function initSettingsPanelDom() {
   loadSettings();
 }
 
-// 初始化文件弹窗：注入通用外观，接上三个按钮，并把本地文件读写能力的检测结果写进那一行
-// 以后往文件弹窗里加控件，绑定也写在这一处，init 只跑一次，监听器不会重复注册
-function initFilePanelDom() {
-  initPopupDom(S.filePanelDom);
-  S.btnOpenDom.addEventListener("click", onOpenFile);
-  S.btnSaveDom.addEventListener("click", onSaveFile);
-  S.btnSaveAsDom.addEventListener("click", onSaveFileAs);
-  S.btnImportSelDom.addEventListener("click", onImportSelection);
-  S.btnExportSelDom.addEventListener("click", onExportSelection);
-  S.btnCopyAiDom.addEventListener("click", copyForAi);
-  // 按下按钮时不让它抢走焦点：按钮一旦留着焦点，之后再按回车会被浏览器当成又点了一次，
-  // 而画布要靠焦点才能响应键盘，焦点不该被按钮占着。拦掉按下时的默认行为即可，点击照常触发
-  S.filePanelDom.addEventListener("mousedown", function (e) {
-    if (e.target.classList.contains("btn")) e.preventDefault();
-  });
-  refreshFileName();
-}
-
-// 初始化教程弹窗：注入与设置、文件两个弹窗同款的底板外观，再摆好尺寸、接上取消按钮
+// 初始化教程弹窗：注入与设置弹窗同款的底板外观，再摆好尺寸、接上取消按钮
 // 它不锚在按钮下方而是浮在屏幕正中，定位交给 CSS 的居中规则，所以这里只写尺寸与外观
 function initTutorialPanelDom() {
   S.tutorialPanelDom.style.width = CONFIG.tutorialPanelW + "px";

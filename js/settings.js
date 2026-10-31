@@ -170,10 +170,9 @@ function renderPopup(dom, anim, anchorRect, vp) {
   dom.style.opacity = p;
 }
 
-// 每帧同步两个弹窗：各自锚定自己的按钮，互不影响；同时只开一个，所以不会出现两块底板叠在一起
+// 每帧同步设置弹窗：锚定设置按钮
 function renderPanels(vp) {
   renderPopup(S.settingsPanelDom, S.settingsLitAnim, settingsSlotRect(vp), vp);
-  renderPopup(S.filePanelDom, S.fileLitAnim, fileSlotRect(vp), vp);
 }
 
 // 每帧同步教程弹窗：位置由 CSS 居中，这里只管进度驱动的显隐与透明度

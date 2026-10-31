@@ -24,9 +24,8 @@ function isSceneSettled() {
   if (state.anchorSX !== state.tAnchorSX || state.anchorSY !== state.tAnchorSY) return false;
   if (state.logScale !== state.tLogScale) return false;
   // 选项槽的缩放已经交给样式表的过渡，不再是逐帧推进的缓动，这里不必再查
-  // 两个按钮的提亮仍按缓动标量走：它们同时驱动弹窗透明度，动画没走完就要继续渲染
+  // 按钮的提亮仍按缓动标量走：它们同时驱动弹窗透明度，动画没走完就要继续渲染
   if (S.settingsLitAnim.t < 1) return false;
-  if (S.fileLitAnim.t < 1) return false;
   if (S.tutorialLitAnim.t < 1) return false;  // 教程按钮的提亮同样要查，否则动画会卡在半路不动
   if (S.tutorialModalAnim.t < 1) return false;  // 教程弹窗的淡入淡出也要查，否则窗口会卡在半透明或停在没显示出来的状态
   if (S.confirmModalAnim.t < 1) return false;  // 确认弹窗同理：它淡出途中若整帧跳过渲染，就会一直停在半透明上

@@ -4,7 +4,7 @@
 /* ========== 常量配置 ========== */
 
 const CONFIG = {
-  appVersion: "1.0.0.005",    // 应用版本号：唯一一处定义，首页副标题、离线缓存与发布包都以它为准；内部号每次改动末位加一
+  appVersion: "1.0.0.006",    // 应用版本号：唯一一处定义，首页副标题、离线缓存与发布包都以它为准；内部号每次改动末位加一
   gridUnit: 1,            // 网格基本单位：1 个世界单位 = 1 格，也是永远显示的最小格子
   gridLineRatio: 0.03,    // 网格线宽 = 格宽 × 这个比例 + gridLineBase，上限 1 CSS px
   gridLineBase: 0.22,     // 上式里的固定加数（CSS px）：线细到 0.25 px 上下就看不见了，靠它兜住，缩到多小也画得出来
@@ -392,13 +392,9 @@ const TEXT_SLOT_INDEX = ELEMENT_SLOT_BASE + PANEL_SLOT_TYPES.length;
 // 给它一个正式序号，悬停与按下就自动走元件槽那同一套，不必再维护第二份状态，手感也不会走样
 const SETTINGS_SLOT_INDEX = CONFIG.panelSlotCount;
 
-// 文件按钮在槽动画数组里的下标：紧挨着设置按钮的左边，所以序号再往后一位
-// 同样给正式序号，悬停与按下复用元件槽那套动画，和设置按钮手感完全一致
-const FILE_SLOT_INDEX = SETTINGS_SLOT_INDEX + 1;
-
-// 教程按钮在槽动画数组里的下标：紧挨着文件按钮的左边，所以序号再往后一位
-// 同样给正式序号，悬停与按下复用元件槽那套动画，三个按钮手感完全一致
-const TUTORIAL_SLOT_INDEX = FILE_SLOT_INDEX + 1;
+// 教程按钮在槽动画数组里的下标：紧挨着设置按钮的左边，所以序号再往后一位
+// 同样给正式序号，悬停与按下复用元件槽那套动画，两个按钮手感完全一致
+const TUTORIAL_SLOT_INDEX = SETTINGS_SLOT_INDEX + 1;
 
 // 判断某个槽序号是不是「元件槽」：元件槽才响应放置类型与简介，选中槽和两个按钮槽都不算
 // 以后再加按钮时，只要它的序号排在元件槽之后，这里不必改

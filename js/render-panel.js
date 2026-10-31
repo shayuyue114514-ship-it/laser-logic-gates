@@ -17,17 +17,6 @@ function settingsSlotRect(vp) {
   };
 }
 
-// 文件入口的位置：尺寸与 y 沿用设置入口，只把横坐标往左挪一格加一个间隔
-function fileSlotRect(vp) {
-  const sr = settingsSlotRect(vp);
-  return {
-    x: sr.x - CONFIG.panelSlotSide - CONFIG.panelSlotGap,
-    y: sr.y,
-    w: sr.w,
-    h: sr.h
-  };
-}
-
 // 简介浮层的位置：紧贴面板矩形下边缘再留一点间隔，向下盖在网格上
 // 面板位置由视口决定，所以这里仍按视口算，与面板实际框线始终对得上
 function panelTipRect(vp) {
@@ -139,8 +128,8 @@ function createPanelButtonEl(index, drawIcon) {
   return el;
 }
 
-// 建整块界面：变量注入 → 左侧一排槽 → 右侧三个按钮 → 摆位置 → 同步一次状态
-// 按钮的行内顺序是教程、文件、设置：最左边的教程紧挨着元件槽，设置的右边与元件槽的右边内沿对称
+// 建整块界面：变量注入 → 左侧一排槽 → 右侧两个按钮 → 摆位置 → 同步一次状态
+// 按钮的行内顺序是教程、设置：最左边的教程紧挨着元件槽，设置的右边与元件槽的右边内沿对称
 function initPanelDom() {
   if (S.panelDom === null) return;
   injectChromeVars();
@@ -151,7 +140,6 @@ function initPanelDom() {
   }
   const btns = [
     [TUTORIAL_SLOT_INDEX, drawTutorialIcon],
-    [FILE_SLOT_INDEX, drawFileIcon],
     [SETTINGS_SLOT_INDEX, drawSettingsIcon]
   ];
   for (let i = 0; i < btns.length; i++) {
@@ -185,7 +173,7 @@ function syncButtonLit(el, on) {
   if (el.classList.contains("lit") !== on) el.classList.toggle("lit", on);
 }
 
-// 同步面板上的所有状态：选中槽的提亮与自己选中的是同一个数据，三个按钮的提亮各自对应自己的开合
+// 同步面板上的所有状态：选中槽的提亮与自己选中的是同一个数据，两个按钮的提亮各自对应自己的开合
 // 每帧调用，但只有状态真的换了才写 DOM
 function syncPanelStates() {
   for (let i = 0; i < S.slotEls.length; i++) {
@@ -194,7 +182,6 @@ function syncPanelStates() {
     if (el.classList.contains("selected") !== sel) el.classList.toggle("selected", sel);
   }
   syncButtonLit(S.slotEls[SETTINGS_SLOT_INDEX], S.settingsOpen);
-  syncButtonLit(S.slotEls[FILE_SLOT_INDEX], S.filePanelOpen);
   syncButtonLit(S.slotEls[TUTORIAL_SLOT_INDEX], S.tutorialOpen);
 }
 

@@ -52,7 +52,6 @@ function init() {
   initSlotTipDom();
   initToastDom();        // 屏幕中间的小提示框：外观只注入一次，之后由 showToast 负责写话与淡出
   initSettingsPanelDom();
-  initFilePanelDom();
   initTutorialPanelDom();
   initConfirmPanelDom();  // 确认弹窗的外观与两个作答按钮，与教程弹窗同一套底板，只做一次
   initStackPanelDom();    // 堆叠设置框：控件绑定与外观注入，只做一次，之后开关只改显隐
