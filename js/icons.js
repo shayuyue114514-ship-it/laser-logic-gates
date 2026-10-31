@@ -176,6 +176,39 @@ function drawAboutIcon(r, k) {
   S.ctx.restore();
 }
 
+// 在给定方框里画「日志」图标：一张圆角纸面，里面三条横线，读起来就是一条条更新记录
+// 与文件图标共用同一档尺寸、圆角与描边，差别只在没有右上折角、改画三条线，两枚入口图标并排时风格一致
+function drawLogIcon(r, k) {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const s = k === undefined ? iconDefaultScale() : k;
+  const hw = CONFIG.logIconHalfW;
+  const hh = CONFIG.logIconHalfH;
+  const cr = CONFIG.logIconCornerR;
+  S.ctx.save();
+  S.ctx.translate(cx, cy);
+  S.ctx.scale(s, s);
+  S.ctx.lineJoin = "round";   // 四角靠圆角连接磨圆，与文件图标的圆角风格一致
+  S.ctx.lineCap = "round";    // 三条线的收笔是圆的，缩小后不出现生硬的方角
+  S.ctx.beginPath();
+  S.ctx.roundRect(-hw, -hh, hw * 2, hh * 2, cr);
+  S.ctx.fillStyle = hslCss(settingsHSL.gearFill);
+  S.ctx.strokeStyle = hslCss(settingsHSL.gearStroke);
+  S.ctx.lineWidth = CONFIG.logIconStroke;
+  S.ctx.fill();
+  S.ctx.stroke();
+  // 三条横线：以纸面中心为中轴对称排布，线色与描边同色，读起来是「一条条记录」
+  S.ctx.beginPath();
+  for (let i = -1; i <= 1; i++) {
+    const y = i * CONFIG.logIconLineGap;
+    S.ctx.moveTo(-CONFIG.logIconLineHalfW, y);
+    S.ctx.lineTo(CONFIG.logIconLineHalfW, y);
+  }
+  S.ctx.lineWidth = CONFIG.logIconLineStroke;
+  S.ctx.stroke();
+  S.ctx.restore();
+}
+
 // 在给定方框里画「新建」的加号：两笔圆头描边，收笔的圆与弹窗里那个叉、以及问号那个点同一套
 // 加号不画圆面：它是四个入口里唯一一个纯动作项，留白多一点，与另外三枚带圆面的图标区分开
 function drawPlusIcon(r, k) {

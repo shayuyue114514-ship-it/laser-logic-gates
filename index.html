@@ -95,7 +95,7 @@
   <div class="boot-track"><i></i></div>
 </div>
 
-<!-- 首页整屏只有这一张画布：网格、两侧演示、标题与四个入口都画在它上面，画法与交互见 js/home.js
+<!-- 首页整屏只有这一张画布：网格、两侧演示、标题与五个入口都画在它上面，画法与交互见 js/home.js
      首页没有编辑器左侧那栏存档列表，也不直接编辑电路，它只做展示与分流 -->
 <canvas id="homeCanvas"></canvas>
 
@@ -125,6 +125,18 @@
   <div class="doc" id="homeAboutDoc"></div>
 </div>
 
+<!-- 日志弹窗：比教程窗更大，逐条列出每个对外版本的简介；每条左侧那枚按钮点开才露出详细信息
+     正文来自 js/changelog.js 的 CHANGELOG，外观与排版由 home.js 注入，与上面两个弹窗同一套 -->
+<div id="homeLogPanel" class="popup modal">
+  <button class="btn icon" id="btnHomeLogClose" aria-label="关闭日志">
+    <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" focusable="false">
+      <path d="M5.5 5.5 L12.5 12.5 M12.5 5.5 L5.5 12.5"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+    </svg>
+  </button>
+  <div class="doc" id="homeLogDoc"></div>
+</div>
+
 <!-- 加载顺序不可随意调整：util.js 必须排在最前面，因为 config.js 在文件顶层就要用 hslToRgb 算配色端点；
      handle-store.js 要排在 home.js 之前，「打开」要用它的 SAVE_FILE_TYPES、startInOption 与句柄记忆；
      element-types.js 与 circuit.js 是元件形状表与电路结算引擎，首页两侧的演示电路跑的就是编辑器同一套，
@@ -140,6 +152,8 @@
 <script src="js/circuit.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/tutorial-content.js"></script>
+<!-- 版本日志正文：首页「日志」弹窗按 CHANGELOG 逐条排，必须排在 home.js 之前 -->
+<script src="js/changelog.js"></script>
 <!-- 离线缓存登记：页面打开时静默把整站存进本地，之后断网也能直接打开，不依赖任何其它脚本 -->
 <script src="js/offline.js"></script>
 <!-- 加载界面与字体加载：两个都要排在 home.js 之前，home.js 起步时第一个要用、紧接着第二个也要用

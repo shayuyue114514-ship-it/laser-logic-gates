@@ -13,19 +13,22 @@ let homeCanvas = null;      // HTMLCanvasElement|null：首页画布；它的 2D
 let homeW = 0;              // number：窗口宽（CSS px），也是画布宽
 let homeH = 0;              // number：窗口高（CSS px），也是画布高
 let homeLastTs = 0;         // number：上一帧的时间戳（毫秒），0 表示还没收到过帧
-let homeEntryAnim = [];     // Array<{scale:Object, text:Object, fill:Object}>：四个入口的缩放与两种颜色的缓动标量
+let homeEntryAnim = [];     // Array<{scale:Object, text:Object, fill:Object}>：五个入口的缩放与两种颜色的缓动标量
 let homeHoverEntry = -1;    // number：指针悬停的入口序号，-1 表示没停在任何一个上
 let homePressedEntry = -1;  // number：指针按下的入口序号，-1 表示没按着
-let homePopup = "";         // string：当前开着的弹窗名（"tutorial" / "about"），空串表示两个都关着
+let homePopup = "";         // string：当前开着的弹窗名（"tutorial" / "about" / "log"），空串表示全关着
 let homeTutorialPanel = null; // HTMLElement|null：教程弹窗容器
 let homeTutorialDoc = null;   // HTMLElement|null：教程弹窗的内容区
 let homeAboutPanel = null;    // HTMLElement|null：关于弹窗容器
 let homeAboutDoc = null;      // HTMLElement|null：关于弹窗的内容区
+let homeLogPanel = null;      // HTMLElement|null：日志弹窗容器
+let homeLogDoc = null;        // HTMLElement|null：日志弹窗的内容区
 let homeTextRgb = null;       // Object|null：入口文字的常态色（RGB 三元组），悬停时要在数值上混过去
 let homeTextHoverRgb = null;  // Object|null：入口文字的悬停色（RGB 三元组）
 let homeEntryFillRgb = null;      // Object|null：入口底板常态填充色（RGB 三元组），悬停时同样要在数值上混
 let homeEntryFillHoverRgb = null; // Object|null：入口底板悬停填充色（RGB 三元组）
 let homeAboutStyleDone = false; // boolean：关于窗的排版样式是否已经注入过，重复调用不再塞第二份
+let homeLogStyleDone = false;    // boolean：日志窗的排版样式是否已经注入过，重复调用不再塞第二份
 let homeDemoL = null;       // Object|null：左侧演示（非门）的运行时对象，见 demoCreate
 let homeDemoR = null;       // Object|null：右侧演示（或门）的运行时对象
 
@@ -42,12 +45,13 @@ let homeDemoR = null;       // Object|null：右侧演示（或门）的运行�
 // 所以两种打开方式各写各的地址
 const EDITOR_URL = location.protocol === "file:" ? "editor.html" : "editor";
 
-// 四个入口：图标画法、文字、点击后要做什么；图标画法一律取 icons.js 里那一份，与编辑器面板同源
+// 五个入口：图标画法、文字、点击后要做什么；图标画法一律取 icons.js 里那一份，与编辑器面板同源
 const HOME_ENTRIES = [
   { key: "new",      label: "新建", icon: drawPlusIcon },
   { key: "open",     label: "打开", icon: drawFileIcon },
   { key: "tutorial", label: "教程", icon: drawTutorialIcon },
-  { key: "about",    label: "关于", icon: drawAboutIcon }
+  { key: "about",    label: "关于", icon: drawAboutIcon },
+  { key: "log",      label: "日志", icon: drawLogIcon }
 ];
 
 /* ========== 两侧演示电路：场景（第 5 节） ========== */
@@ -651,41 +655,154 @@ function fillAboutDoc() {
   }
 }
 
-// 开关弹窗：两个窗互斥，开一个另一个自动关；点同一个入口再点一次就把当前这个关掉
-// 名字传空串即全部关掉，两个叉形关闭按钮都走这一条路
+// 日志窗的排版样式：每一条是一行「展开按钮 + 版本信息」，详细信息默认收着，点按钮才展开
+// 样式与 fillLogDoc 排的类名一一对应；颜色一律回读 COLOR，与上面两个弹窗同一套配色
+function initHomeLogStyle() {
+  if (homeLogStyleDone) return;
+  homeLogStyleDone = true;
+  const css =
+    '.popup.modal .doc .log-item { display: flex; align-items: flex-start; margin: 0 0 12px; padding: 0 0 12px; border-bottom: 1px solid rgba(41, 182, 246, 0.35); }' +
+    '.popup.modal .doc .log-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }' +
+    // 左侧展开按钮：平时透明，悬停才浮出一层淡白，读法与文件弹窗里的动作项相同
+    '.popup.modal .doc .log-toggle { flex: none; box-sizing: border-box; width: 22px; height: 22px; margin-right: 8px; padding: 0; border: none; border-radius: 6px; background: transparent; color: ' + COLOR.tipName + '; cursor: pointer; transition: background-color 0.16s ease-out; display: flex; align-items: center; justify-content: center; }' +
+    '.popup.modal .doc .log-toggle:hover { background: rgba(255, 255, 255, 0.66); }' +
+    '.popup.modal .doc .log-toggle:active { background: rgba(255, 255, 255, 0.92); }' +
+    // 三角用 CSS 画，不依赖字体里有没有那个字形；展开时旋到朝下
+    '.popup.modal .doc .log-toggle .log-arrow { display: block; width: 0; height: 0; border-left: 6px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform 0.16s ease-out; }' +
+    '.popup.modal .doc .log-item.is-open .log-toggle .log-arrow { transform: rotate(90deg); }' +
+    '.popup.modal .doc .log-main { flex: 1; min-width: 0; }' +
+    '.popup.modal .doc .log-head { display: flex; align-items: baseline; }' +
+    '.popup.modal .doc .log-version { font-size: 1.1em; font-weight: 700; color: ' + COLOR.tipName + '; }' +
+    '.popup.modal .doc .log-date { margin-left: 10px; font-size: 0.9em; opacity: 0.65; }' +
+    '.popup.modal .doc .log-summary { margin: 6px 0 0; }' +
+    '.popup.modal .doc .log-details { display: none; margin: 8px 0 0; padding: 0 0 0 1.1em; }' +
+    '.popup.modal .doc .log-item.is-open .log-details { display: block; }';
+  const styleDom = document.createElement("style");
+  styleDom.textContent = css;
+  document.head.appendChild(styleDom);
+}
+
+// 填日志窗的正文：每条版本一行，左侧是展开按钮，右侧是版本号、日期与简介，详细信息收在下面
+// 文字一律用 textContent 写入，日志内容写死在 changelog.js 里，不经过任何外部输入
+function fillLogDoc() {
+  homeLogDoc.innerHTML = "";   // 先清空：重复调用也不会堆出第二份
+  for (let i = 0; i < CHANGELOG.length; i++) {
+    const rec = CHANGELOG[i];
+    const item = document.createElement("div");
+    item.className = "log-item";
+    const toggle = document.createElement("button");
+    toggle.className = "log-toggle";
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-label", "展开 " + rec.version + " 的详细信息");
+    const arrow = document.createElement("span");
+    arrow.className = "log-arrow";
+    toggle.appendChild(arrow);
+    item.appendChild(toggle);
+    const main = document.createElement("div");
+    main.className = "log-main";
+    const head = document.createElement("div");
+    head.className = "log-head";
+    const version = document.createElement("span");
+    version.className = "log-version";
+    version.textContent = rec.version;
+    head.appendChild(version);
+    if (rec.date) {
+      const date = document.createElement("span");
+      date.className = "log-date";
+      date.textContent = rec.date;
+      head.appendChild(date);
+    }
+    main.appendChild(head);
+    const summary = document.createElement("p");
+    summary.className = "log-summary";
+    summary.textContent = rec.summary;
+    main.appendChild(summary);
+    const details = document.createElement("ul");
+    details.className = "log-details";
+    for (let k = 0; k < rec.details.length; k++) {
+      const li = document.createElement("li");
+      li.textContent = rec.details[k];
+      details.appendChild(li);
+    }
+    main.appendChild(details);
+    item.appendChild(main);
+    homeLogDoc.appendChild(item);
+  }
+}
+
+// 日志窗展开/收起：只绑一次，挂在内容区上，点哪一条的按钮就展开哪一条
+// 按钮的 aria-expanded 跟着状态走，读屏与键盘用户也能知道这一条现在是开是合
+function onHomeLogDocClick(e) {
+  const target = e.target;
+  const toggle = target && target.closest ? target.closest(".log-toggle") : null;
+  if (!toggle) return;
+  const item = toggle.parentNode;
+  const open = !item.classList.contains("is-open");
+  item.classList.toggle("is-open", open);
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  const versionDom = item.querySelector(".log-version");
+  const label = versionDom ? versionDom.textContent : "";
+  toggle.setAttribute("aria-label", (open ? "收起 " : "展开 ") + label + " 的详细信息");
+}
+
+// 日志窗尺寸随窗口收一收：窗口比 680×560 还小时按边距缩，不让弹窗顶出屏幕
+// 只在尺寸真的变了才写回，避免每帧都碰 DOM
+function updateHomeLogSize() {
+  if (!homeLogPanel) return;
+  const w = Math.min(HOME.logW, homeW - 32);
+  const h = Math.min(HOME.logH, homeH - 32);
+  homeLogPanel.style.width = Math.max(w, 200) + "px";
+  homeLogPanel.style.height = Math.max(h, 200) + "px";
+}
+
+// 开关弹窗：三个窗互斥，开一个另两个自动关；点同一个入口再点一次就把当前这个关掉
+// 名字传空串即全部关掉，三个叉形关闭按钮都走这一条路
 // 显隐用 display 直接切，并把 opacity 一并摆正：样式表里 .popup 的默认透明度是 0，
 // 编辑器那边由主循环逐帧把它推到 1 做淡入淡出；首页不做这段动画，所以要在这里自己写成 1
 function setHomePopup(name) {
   homePopup = homePopup === name ? "" : name;
   const showTutorial = homePopup === "tutorial";
   const showAbout = homePopup === "about";
+  const showLog = homePopup === "log";
   homeTutorialPanel.style.display = showTutorial ? "flex" : "none";
   homeTutorialPanel.style.opacity = showTutorial ? "1" : "0";
   homeAboutPanel.style.display = showAbout ? "flex" : "none";
   homeAboutPanel.style.opacity = showAbout ? "1" : "0";
+  homeLogPanel.style.display = showLog ? "flex" : "none";
+  homeLogPanel.style.opacity = showLog ? "1" : "0";
   // 弹窗一开就把入口的悬停清掉：指针可能正停在某个入口上，不清会一直留着按下的样子
   homeHoverEntry = -1;
   homePressedEntry = -1;
 }
 
-// 初始化两个弹窗：外观、内容、关闭按钮一次做完
+// 初始化三个弹窗：外观、内容、关闭按钮一次做完
 // 监听器只在这里绑一次，重复初始化不会重复注册
 function initHomePopups() {
   homeTutorialPanel = document.getElementById("homeTutorialPanel");
   homeTutorialDoc = document.getElementById("homeTutorialDoc");
   homeAboutPanel = document.getElementById("homeAboutPanel");
   homeAboutDoc = document.getElementById("homeAboutDoc");
+  homeLogPanel = document.getElementById("homeLogPanel");
+  homeLogDoc = document.getElementById("homeLogDoc");
   initHomeModalDom(homeTutorialPanel, homeTutorialDoc, HOME.tutorialW, HOME.tutorialH);
   initHomeModalDom(homeAboutPanel, homeAboutDoc, HOME.aboutW, 0);   // 高度传 0：关于窗由内容自己定高
+  initHomeModalDom(homeLogPanel, homeLogDoc, HOME.logW, HOME.logH);
+  updateHomeLogSize();                    // 窗口不够大时把日志窗收一收，不能让弹窗顶出屏幕
   initTutorialDocStyle();                  // 教程正文自己的排版样式，与编辑器共用同一份
   homeTutorialDoc.innerHTML = TUTORIAL_TEXT;   // 内容来自共用文件，两个页面的教程一字不差
   initHomeAboutStyle();
   fillAboutDoc();
-  // 叉形关闭按钮只绑这一处；两个窗的显隐全由 setHomePopup 一处改写，别处不再碰 display
+  initHomeLogStyle();
+  fillLogDoc();
+  // 叉形关闭按钮只绑这一处；三个窗的显隐全由 setHomePopup 一处改写，别处不再碰 display
   document.getElementById("btnHomeTutorialClose").addEventListener("click", function () { setHomePopup(""); });
   document.getElementById("btnHomeAboutClose").addEventListener("click", function () { setHomePopup(""); });
+  document.getElementById("btnHomeLogClose").addEventListener("click", function () { setHomePopup(""); });
+  // 展开按钮：内容区里每一条都有一个，用一次委托代替逐条绑定，条数以后增加也不必补监听
+  homeLogDoc.addEventListener("click", onHomeLogDocClick);
   // 按下按钮时不让它抢走焦点：与编辑器里那几块弹窗同一套处理
-  const panels = [homeTutorialPanel, homeAboutPanel];
+  const panels = [homeTutorialPanel, homeAboutPanel, homeLogPanel];
   for (let i = 0; i < panels.length; i++) {
     panels[i].addEventListener("mousedown", function (e) {
       if (e.target.classList.contains("btn")) e.preventDefault();
@@ -825,6 +942,7 @@ function resizeHomeCanvas() {
   homeCanvas.style.width = homeW + "px";
   homeCanvas.style.height = homeH + "px";
   S.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // 这里设一次，之后所有绘制都用 CSS 像素坐标，高清屏才不会糊
+  updateHomeLogSize();                        // 日志窗按新版窗口尺寸收一次，窗口变小时不会顶出屏幕
 }
 
 // 初始化：拿上下文 → 定画布尺寸 → 备好配色与缓动 → 建两个弹窗与两侧演示 → 绑事件 → 启动主循环
