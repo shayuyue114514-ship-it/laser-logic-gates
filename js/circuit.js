@@ -181,6 +181,7 @@ function rebuildRayGraph() {
 function stepMicroframe() {
   // 元件增删或朝向定下来之后才重建阻挡图；重建会让上一微帧的发射表作废，必须重算
   if (S.rayGraph.dirty) rebuildRayGraph();
+  applyPendingLightOff();   // 上一微帧被光照到的光源，到这一刻才真正关掉自己
   const diff = buildEmitMask();
   // 发射表与上一微帧完全一致时，激光场与接收掩码必然不变，跳过重算
   // 既省掉空转时的重复计算，也让下面那几张小表只在真有变化时才动
@@ -189,6 +190,7 @@ function stepMicroframe() {
     S.laserSegments = computeLaserSegments();
     scheduleOutputs();   // 按本微帧的接收排下一微帧的输出，微时序的 1 帧延迟就落在这一步
     updateLampInputs();  // 顺手把接收结果落到灯身上，决定它这一微帧亮不亮
+    markLightsHit();     // 收到光的光源记一笔，等下一微帧开头关掉自己
     simEmitDiff = false;
     simFullPass = false;
     S.sceneDirty = true;   // 激光场变了，强制重绘一次，否则静止判定会把这次变化吞掉
@@ -220,6 +222,7 @@ function refreshLightField() {
   recomputeMasks();
   S.laserSegments = computeLaserSegments();
   updateLampInputs();   // 顺手把「现在照到谁」落到灯身上，免得灯要等下一个微帧才亮
+  markLightsHit();      // 被光照到的光源也在这里记号，恢复运行时按微帧时序熄灭
   S.sceneDirty = true;
 }
 
@@ -238,6 +241,7 @@ function resetLaserField() {
   recvPrev.length = 0;
   S.laserSegments = [];         // 画面上的激光线段整份清空
   for (let i = 0; i < lampEls.length; i++) lampEls[i].litIn = false;  // 灯回到不亮
+  for (let i = 0; i < lightEls.length; i++) lightEls[i].offPending = false;  // 熄灭请求一并作废，光都清了就不该再关谁
   simEmitDiff = true;         // 明确要求下一微帧重算，不靠旧发射表跳过
   simFullPass = true;         // 灯按整表重排一遍，免得稀疏表里漏掉刚清掉的灯
   S.microAcc = 0;               // 丢掉半截微帧，从干净的边界重新计
@@ -272,18 +276,25 @@ function stepSimulation(dt) {
   pcount("微帧", steps);   // 探针读数：本帧实际结算了几个微帧
 }
 
-// 不设延迟时把整条链在一帧内跑完：反复结算，直到某一微帧开头的发射表与上一微帧完全相同
-// 发射表没变说明没有任何元件再产生新输出，链已停住；上限只用来防止逻辑成环时死循环
+// 不设延迟时把这一帧的时间预算尽量算满：每跑完一轮（链自己停住）就重新起一轮，接着算到预算用尽
+// 一轮算完只说明此刻没有新的输出可推，剩下的时间不该空着等下一帧，所以强制下一微帧重算全套再走一轮
+// 逻辑成环（例如反相器把输出接回自己的输入）时链永远不自己停，这时由时间预算负责收手：
+// 一帧最多花 CONFIG.zeroDelayBudgetMs 毫秒结算，跑不完就留到下一帧接着跑，画面保住 30 帧、不会再整页卡死
 // 元件之间那 1 微帧的延迟仍然保留，只是不再等真实时间，逻辑语义与慢速时完全一致
-// 每一微帧只沿着几张发射/接收的小表走，所以这条循环的长度不再与元件总数挂钩
 function runToQuiescence() {
   S.microAcc = 0;  // 零延迟下不攒余数，否则切回慢速时会突然补算一帧
-  let steps = 0;   // 探针读数：这一帧为了跑到底结算了几个微帧
+  let steps = 0;   // 探针读数：这一帧一共结算了几个微帧
+  const t0 = performance.now();
   for (let i = 0; i < CONFIG.maxQuiescentSteps; i++) {
     steps++;
-    if (!stepMicroframe()) { pcount("微帧", steps); return; }
+    if (!stepMicroframe()) {
+      // 这一轮已经推到底：把「还没按新几何重推过」重新标上，下一微帧就会完整再算一轮
+      simEmitDiff = true;
+    }
+    // 每八步查一次时钟：逐微帧读时钟太碎，隔几步查一次既压住开销，又不会让预算超太多
+    if ((i & 7) === 7 && performance.now() - t0 >= CONFIG.zeroDelayBudgetMs) break;
   }
-  pcount("微帧", steps);   // 撞上安全上限时也把步数记上，这种情形值得在读数里看见
+  pcount("微帧", steps);   // 时间预算用满或撞上步数上限时，把这一帧的步数记进读数
 }
 
 // 收集本微帧所有元件要发射的方向，写进发射表，返回「与上一微帧有没有差异」
@@ -347,6 +358,37 @@ function updateLampInputs() {
   }
 }
 
+// 收到光的光源在本微帧只记一笔记号，真正关掉自己留到下一微帧开头
+// 这样它与门一样遵守「t 微帧接收、t+1 微帧生效」的时序，不会在收到光的同一刻就熄灭
+function markLightsHit() {
+  for (let j = 0; j < lightEls.length; j++) {
+    const el = lightEls[j];
+    if (el.deleting || el.selected) continue;   // 悬空与正在消失的不算被照到
+    if (S.recvMask[el.idx] !== 0) el.offPending = true;
+  }
+}
+
+// 把上一微帧记下记号的光源关掉：开关归零，它从本微帧起不再发射
+// 悬空与正在消失的光源只清记号不关开关，等它回到电路里再按当时的光照重新判定
+function applyPendingLightOff() {
+  for (let j = 0; j < lightEls.length; j++) {
+    const el = lightEls[j];
+    if (!el.offPending) continue;
+    el.offPending = false;
+    if (el.deleting || el.selected) continue;
+    if (!el.on) continue;   // 本来就关着，没有可见变化，不必置脏
+    el.on = false;   // 置零：被别的光照到就自己熄灭
+    // 这是用户看得见的变化，必须能被保存：标成未保存，列表上那一条才会亮圆点、关页前才会提示
+    S.docDirty = true;
+    S.docEditSeq++;   // 改动序号往前走，保存时靠它判断写出去的那份之后有没有又变过
+    // 同步撤销基准：这次自动熄灭不记步，但若不把基准改成熄灭后的样子，
+    // 下一次用户操作会把这段差异一起吸收进自己的撤销步，表现为「撤销一个无关操作，灯又亮了」
+    const base = S.committedTable.get(el.id);
+    if (base !== undefined) base.rec = elementToRecord(el);
+  }
+}
+
+
 // 按本微帧的接收结果安排各元件下一微帧的输出，实现文档 §8.2 的「t 微帧接收、t+1 微帧输出」
 // 光源不参与：它的输出完全由开关决定，elementEmit 里已经直接算好
 // 灯也不参与：它只作指示，收到光只用来点亮自己，不会往下游发
@@ -376,6 +418,9 @@ function scheduleOutputs() {
 // 结果与旧值相同就直接返回：省掉一次表操作，也让「有没有新输出」的判定不被无谓地打扰
 function applyGateOutput(el, recv) {
   if (el.deleting || el.selected) return;   // 悬空与正在消失的元件不参与推演，输出原样留着
+  // 灯与光源不是门：它们只收光、不按门的规则发火。增量那一路是「凡收到光就排一次输出」，
+  // 收光的元件里本来就会混进灯与光源，少了这一句它们就会被当成偏转器朝箭头方向发射
+  if (el.typeId === "lamp" || el.typeId === "light") return;
   const valid = recv & ~(1 << el.dir);      // 抹掉出口侧那一位，剩下的位里只要有一位就是有效输入
   const v = el.typeId === "inverter" ? (valid ? 0 : (1 << el.dir)) : (valid ? (1 << el.dir) : 0);
   if (v === el.out) return;

@@ -105,6 +105,31 @@ html, body {
   pointer-events: none;     /* 指针从小窗上穿过去，不会因为它挡住而反复触发进出 */
   user-select: none;
 }
+/* 屏幕中间的提示框：一句短话，写在一个浅蓝的小框里，停在网格视口正中
+   位置由脚本每次弹出时按视口中线算，这里只管外观：底色与描边跟简介浮层、弹窗同一套，
+   透明度走过渡，脚本到点摘掉 show 类就是淡出；它不接收指针，免得挡住底下刚要点的东西 */
+#centerToast {
+  display: none;
+  position: fixed;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  max-width: 60vw;
+  padding: 8px 18px;
+  border: 2px solid;
+  border-radius: 8px;
+  opacity: 0;
+  transform: translate(-50%, -50%);   /* 定位点取框的中心：脚本只需给出视口中线的坐标 */
+  transition: opacity 0.3s ease-out;  /* 淡出的曲线与时长相符，时长另由脚本按配置改写 */
+  pointer-events: none;               /* 提示只是说话，不拦任何点击 */
+  user-select: none;
+  white-space: nowrap;                /* 提示都是短句，一律单行；过长时由 max-width 与省略号收住 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#centerToast.show {
+  opacity: 1;
+}
 /* 格子里的图标：尺寸定死，具体图形由脚本按 SVG 建出来
    两个状态图标叠在同一格里，靠父格子的 paused 类决定露哪一个，位置因此永远对齐 */
 .rb-ico {
@@ -445,6 +470,115 @@ html, body {
 #slotTipName {
   font-weight: 700;
 }
+/* 顶部元件面板与底部栏：都是固定在窗口上的界面框，位置与尺寸由脚本按视口算好后写成内联样式
+   配色、槽尺寸、间隔、圆角、动画时长全部走 CSS 变量，变量的值由脚本从 CONFIG / COLOR 注入一次
+   两者与外框同色，风格和网格视口边框一致；层级压在画布与元件层之上、弹窗（4）与简介浮层（5）之下 */
+#topPanel,
+#bottomBar {
+  position: fixed;
+  box-sizing: border-box;
+  z-index: 3;
+  background: var(--panel-fill);
+  border: 2px solid var(--border-color);
+  user-select: none;
+  -webkit-user-select: none;
+}
+#topPanel {
+  display: flex;
+  align-items: flex-start;
+  padding: var(--slot-pad);
+  overflow: hidden;
+}
+/* 左侧选项槽一排：不参与伸缩，窗口太窄时只把这一排裁掉，不会顶到右边的按钮上去 */
+#panelSlots {
+  display: flex;
+  gap: var(--slot-gap);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+/* 右侧三个按钮：靠右对齐，与元件槽同尺寸、同间隔，永远不参与收缩 */
+#panelButtons {
+  display: flex;
+  gap: var(--slot-gap);
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+/* 一个槽：正方形、有描边与圆角；悬停与按下只改 transform，整槽连里面图标一起缩
+   收缩用固定时长的缓出曲线；底色与描边的变化走更短的一档，选中与提亮都不会拖泥带水 */
+#panelSlots > .pslot,
+#panelButtons > .pslot {
+  position: relative;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: var(--slot-side);
+  height: var(--slot-side);
+  padding: 0;
+  background: var(--slot-fill);
+  border: 2px solid var(--slot-border);
+  border-radius: var(--slot-radius);
+  transition:
+    transform var(--slot-anim) cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.1s linear,
+    border-color 0.1s linear,
+    border-width 0.1s linear;
+  cursor: default;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+#panelSlots > .pslot:hover,
+#panelSlots > .pslot.kb,
+#panelButtons > .pslot:hover,
+#panelButtons > .pslot.kb {
+  transform: scale(var(--slot-hover));
+}
+#panelSlots > .pslot:active,
+#panelButtons > .pslot:active {
+  transform: scale(var(--slot-press));
+}
+/* 选中的槽：底色与描边同时提亮、描边加粗；没有额外的框或光圈 */
+#panelSlots > .pslot.selected {
+  background: var(--slot-fill-sel);
+  border-color: var(--slot-border-sel);
+  border-width: var(--slot-border-sel-width);
+}
+/* 三个按钮打开时只提亮底板，图标保持原色 */
+#panelButtons > .pslot.lit {
+  background: var(--btn-lit-fill);
+  border-color: var(--btn-lit-stroke);
+  transition:
+    transform var(--slot-anim) cubic-bezier(0.22, 1, 0.36, 1),
+    background-color var(--lit-anim) linear,
+    border-color var(--lit-anim) linear;
+}
+/* 槽里的图标：绝对居中，这样选中时描边加粗不会把它推偏，悬停时又跟着整槽一起缩 */
+.pslotIcon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+/* 底部栏：与顶部面板同底色同描边，高度只有它的一半，里面只放一行提示文字 */
+#bottomBar {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+/* 提示文字：单行、垂直居中、左对齐；左内缩与上方第一个元件槽相同，上下两栏的左边缘落在同一条线上
+   窗口太窄放不下整条时由脚本把它整条藏起来，不让它压到描边上 */
+#bottomBarHint {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: calc(var(--slot-pad) + 2px);
+  padding-right: calc(var(--slot-pad) + 2px);
+  font-family: var(--ui-font);
+  font-size: var(--hint-size);
+  color: var(--hint-color);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
 /* 弹出面板的通用外观：设置弹窗与文件弹窗共用这一类，两者的底板、行布局、控件样式完全一致
    这里只管定位与层级，字号、内边距、圆角、颜色由 JS 从 CONFIG / COLOR 一次性注入
    显示时要接住鼠标，所以指针事件是开的；隐藏时 display 为 none，自然收不到任何事件 */
@@ -760,4 +894,202 @@ html, body {
 #debugPanel .perfRow {
   padding-bottom: 6px;
   border-bottom: 1px solid #CFE3F2;
+}
+/* 堆叠设置框：叠在网格正中，位置与缩放都由脚本每帧按相机写入，这里只定版面
+   高度、圆角、底板色同样由脚本从 CONFIG / COLOR 注入，与另外几个弹窗是同一套 */
+.popup.stackpanel {
+  transform-origin: 0 0;   /* 缩放绕左上角算，脚本给出的屏幕坐标就是它的落点 */
+  white-space: nowrap;     /* 行内都是短标签，一律单行 */
+  user-select: none;       /* 框里的字只是标签，拖框时不该顺手被选中 */
+  cursor: grab;            /* 整块都能抓起来拖，指针给个抓手 */
+}
+/* 拖动中换成抓紧的手势，松手后回到可抓状态 */
+.popup.stackpanel.dragging {
+  cursor: grabbing;
+}
+/* 标题：贴在框顶、居中，下面一条细线把它与设置行分开 */
+.popup.stackpanel .ttl {
+  padding-bottom: 7px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(41, 182, 246, 0.45);
+  color: #0D47A1;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+/* 数字与两个步进键抱成一组，靠右收住，与左边标签分列两端 */
+.popup.stackpanel .numgroup {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+/* 数字输入：白底淡蓝描边的小格，宿主的行高由脚本注入，这里只定宽度与文字对齐 */
+.popup.stackpanel .st-input {
+  box-sizing: border-box;
+  width: 46px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid #29B6F6;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1B6C8F;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: center;
+  outline: none;
+  user-select: text;   /* 输入框例外：里面的数字要能选中改动 */
+  cursor: text;
+}
+.popup.stackpanel .st-input:focus {
+  border-color: #1565C0;   /* 焦点用更深的描边表示，与标签输入框同一套读法 */
+}
+/* 浏览器自带的上下箭头会与我们这两个步进键重复，两个都藏掉 */
+.popup.stackpanel .st-input::-webkit-outer-spin-button,
+.popup.stackpanel .st-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.popup.stackpanel .st-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+/* 步进键：与元件槽同一套圆角与配色，点一下加一或减一 */
+.popup.stackpanel .st-step {
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #29B6F6;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #0D47A1;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.popup.stackpanel .st-step:hover { background: rgba(255, 255, 255, 0.85); }
+.popup.stackpanel .st-step:active { background: rgba(255, 255, 255, 0.98); }
+/* 底部两个按键：各按自己文字的宽窄收住，右对齐，取消在左、确认在右 */
+.popup.stackpanel .acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.popup.stackpanel .acts .btn {
+  justify-content: center;
+  width: auto;
+  flex: none;
+  height: 28px;
+  padding: 0 16px;
+}
+
+/* 查找设置框：两行小控件，贴在网格视口右上角；宽度与内边距由脚本从配置注入 */
+#searchPanel {
+  display: none;
+  position: fixed;
+  box-sizing: border-box;
+  border: 2px solid;
+  opacity: 0;
+  pointer-events: auto;
+  z-index: 4;               /* 与其它弹窗同一档：压在画布与右侧工具栏之上 */
+  user-select: none;
+}
+/* 每一行：左边的控件靠左、右边的靠右，两行高度一致，框身因此很矮 */
+#searchPanel .srow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+}
+/* 准确/模糊：一个可点的圆角小条，文字就是当前方式 */
+#searchPanel .smode {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid #29B6F6;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #0D47A1;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#searchPanel .smode:hover { background: rgba(255, 255, 255, 0.85); }
+#searchPanel .smode:active { background: rgba(255, 255, 255, 0.98); }
+/* 放大镜按钮：方形圆角小键，按下与悬停只改底色，不做缩放，免得整框跟着动 */
+#searchPanel .sgo {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #29B6F6;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+}
+#searchPanel .sgo:hover { background: rgba(255, 255, 255, 0.9); }
+#searchPanel .sgo:active { background: rgba(255, 255, 255, 1); }
+/* 变灰：没选中元件时按钮不可用，只降透明度，不换配色，一眼看得出是同一颗按钮暂时不能按 */
+#searchPanel .sgo.off {
+  opacity: 0.38;
+  cursor: default;
+}
+#searchPanel .sgo.off:hover { background: rgba(255, 255, 255, 0.55); }
+#searchPanel .sgo svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  pointer-events: none;    /* 点在图标上也等于点在按钮上 */
+}
+/* 页码行：左边「1/12」，右边两个箭头 */
+#searchPanel .spage {
+  color: #0D47A1;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+#searchPanel .snav {
+  display: flex;
+  gap: 4px;
+}
+#searchPanel .spg {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #29B6F6;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #0D47A1;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+#searchPanel .spg:hover { background: rgba(255, 255, 255, 0.88); }
+#searchPanel .spg:active { background: rgba(255, 255, 255, 1); }
+#searchPanel .spg.off {
+  opacity: 0.38;
+  cursor: default;
+}
+/* 按钮变灰时的解释：一行小字浮在按钮左下方，不挡页码 */
+#searchTip {
+  display: none;
+  position: fixed;
+  z-index: 5;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #C4EBFF;
+  color: #0D47A1;
+  font-size: 12px;
+  line-height: 17px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
 }

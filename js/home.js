@@ -303,13 +303,12 @@ function demoApplyInputs(d, mf) {
 
 // 让这一侧往前结算一个微帧：把全局名临时指到这一侧，再调编辑器那份 stepMicroframe
 // 引擎读的是 elements / rayGraph 这几个全局名，所以两侧演示要轮流借用它们；
-// 借之前把阻挡图标脏、把上一微帧的发射掩码清空，引擎才会照新的元件表从头算一遍
+// 借之前把阻挡图标脏，引擎才会照这一侧的元件表从头算一遍（重建时发射表与掩码自然作废）
 // 借完之后把结果抄回这一侧自己的对象上，另一侧再轮到它时不会互相踩
 function demoStepOnce(d) {
   demoApplyInputs(d, d.done);
   S.elements = d.els;
   S.rayGraph.dirty = true;
-  lastEmit = null;
   stepMicroframe();
   d.segments = S.laserSegments;   // 引擎每次重算都会换一个新数组，直接引用是安全的
   for (let i = 0; i < d.els.length; i++) {

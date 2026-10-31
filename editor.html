@@ -117,6 +117,22 @@
 <canvas id="gridCanvas" tabindex="0"></canvas>
 <svg id="elemLayer"></svg>
 
+<!-- 顶部元件面板：底板、一排选项槽与右侧三个按钮全部由 DOM 承担，位置与尺寸在窗口变化时由脚本按视口摆一次
+     槽与按钮的图标各画在一张 50×50 的小画布上，悬停缩放、选中高亮、按钮提亮全交给样式表 -->
+<div id="topPanel">
+  <div id="panelSlots"></div>
+  <div id="panelButtons"></div>
+</div>
+
+<!-- 底部栏：与顶部面板同一套外观，只放一行随状态变化的操作提示 -->
+<div id="bottomBar">
+  <div id="bottomBarHint"></div>
+</div>
+
+<!-- 屏幕中间的提示框：只写一句短话，停留三秒后自己淡出，不需要手点关闭
+     位置不写死在这里：每次弹出时按网格视口的中线摆一次，窗口换尺寸后也不会偏 -->
+<div id="centerToast"></div>
+
 <!-- 简介浮层：排在元件层之后，配合 z-index 保证它永远画在元件之上 -->
 <div id="slotTip">
   <div id="slotTipName"></div>
@@ -154,6 +170,10 @@
     <span class="sw on" id="advSwitch"><span class="knob"></span></span>
   </div>
   <div class="row">
+    <span class="lbl">滚轮平移</span>
+    <span class="sw" id="wheelSwitch"><span class="knob"></span></span>
+  </div>
+  <div class="row">
     <span class="lbl">渲染精度</span>
     <input type="range" id="renderPrecisionSlider">
     <span class="val" id="renderPrecisionValue"></span>
@@ -179,6 +199,68 @@
   <button class="btn" id="btnExportSel">以选区导出</button>
   <button class="btn" id="btnCopyAi">复制给 AI</button>
 </div>
+
+<!-- 堆叠设置框：点右侧工具栏的「堆叠」后浮在网格正中，跟着地图一起缩放平移
+     里面是几行数字与一个开关，改动时画布上实时显示将要叠出来的虚影，确认后才真正落成元件 -->
+<div id="stackPanel" class="popup stackpanel">
+  <div class="ttl">堆叠</div>
+  <div class="row">
+    <span class="lbl">堆叠次数</span>
+    <span class="numgroup">
+      <input type="number" id="stackCount" class="st-input" value="2" min="1" step="1">
+      <button type="button" class="st-step" id="stackCountPlus">+</button>
+      <button type="button" class="st-step" id="stackCountMinus">−</button>
+    </span>
+  </div>
+  <div class="row">
+    <span class="lbl">X偏移</span>
+    <span class="numgroup">
+      <input type="number" id="stackDX" class="st-input" value="0" step="1">
+      <button type="button" class="st-step" id="stackDXPlus">+</button>
+      <button type="button" class="st-step" id="stackDXMinus">−</button>
+    </span>
+  </div>
+  <div class="row">
+    <span class="lbl">Y偏移</span>
+    <span class="numgroup">
+      <input type="number" id="stackDY" class="st-input" value="-1" step="1">
+      <button type="button" class="st-step" id="stackDYPlus">+</button>
+      <button type="button" class="st-step" id="stackDYMinus">−</button>
+    </span>
+  </div>
+  <div class="row">
+    <span class="lbl">每次镜像</span>
+    <span class="sw" id="stackMirror"><span class="knob"></span></span>
+  </div>
+  <div class="row">
+    <span class="lbl">替换重叠的元件</span>
+    <span class="sw" id="stackReplace"><span class="knob"></span></span>
+  </div>
+  <div class="acts">
+    <button class="btn" id="btnStackCancel" type="button">取消</button>
+    <button class="btn primary" id="btnStackOk" type="button">确认</button>
+  </div>
+</div>
+
+<!-- 查找设置框：点右侧工具栏第五格的放大镜后贴在网格视口右上角，不随地图平移缩放
+     上面一行是准确/模糊的切换与放大镜按钮，下面一行是页码与左右两个箭头；
+     页码只在切换箭头时才带着视角走，刚搜出来时视角保持不动 -->
+<div id="searchPanel" class="popup searchpanel">
+  <div class="srow">
+    <span class="smode" id="searchMode">准确</span>
+    <button type="button" class="sgo" id="searchGo" aria-label="搜索"></button>
+  </div>
+  <div class="srow spager">
+    <span class="spage" id="searchPage">0/0</span>
+    <span class="snav">
+      <button type="button" class="spg" id="searchPrev" aria-label="上一个结果">‹</button>
+      <button type="button" class="spg" id="searchNext" aria-label="下一个结果">›</button>
+    </span>
+  </div>
+</div>
+
+<!-- 放大镜按钮变灰时的那句解释：单独一层，指针停在按钮上才出现，离开就收起 -->
+<div id="searchTip"></div>
 
 <!-- 教程弹窗：点教程按钮后从屏幕正中弹出，底板与设置、文件两个弹窗同一套配色 -->
 <!-- 左上角是一个叉形的关闭按钮，点了就把窗口关掉；下面的内容区先留空，等教程文字写好之后再填进去 -->
@@ -237,70 +319,6 @@
     <label>剔除<span class="val" id="perfCulled">--</span></label>
     <label>缩放<span class="val" id="perfScale">--</span></label>
   </div>
-  <div class="grp">
-    <span class="sw" id="swFill"></span>
-    <label>填充</label>
-    <label>H<input type="range" id="fillH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="fillS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="fillL" min="0" max="100" step="1"></label>
-    <span class="code" id="codeFill"></span>
-  </div>
-  <div class="grp">
-    <span class="sw" id="swStroke"></span>
-    <label>描边</label>
-    <label>H<input type="range" id="strokeH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="strokeS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="strokeL" min="0" max="100" step="1"></label>
-    <span class="code" id="codeStroke"></span>
-  </div>
-  <div class="grp">
-    <span class="sw" id="swPanel"></span>
-    <label>底板</label>
-    <label>H<input type="range" id="panelH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="panelS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="panelL" min="0" max="100" step="1"></label>
-    <span class="code" id="codePanel"></span>
-  </div>
-  <div class="grp">
-    <span class="sw" id="swSlot"></span>
-    <label>槽填充</label>
-    <label>H<input type="range" id="slotH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="slotS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="slotL" min="0" max="100" step="1"></label>
-    <span class="code" id="codeSlot"></span>
-  </div>
-  <div class="grp">
-    <span class="sw" id="swGearFill"></span>
-    <label>齿轮填充</label>
-    <label>H<input type="range" id="gearFillH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="gearFillS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="gearFillL" min="0" max="100" step="1"></label>
-    <span class="code" id="codeGearFill"></span>
-  </div>
-  <div class="grp">
-    <span class="sw" id="swGearStroke"></span>
-    <label>齿轮描边</label>
-    <label>H<input type="range" id="gearStrokeH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="gearStrokeS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="gearStrokeL" min="0" max="100" step="1"></label>
-    <span class="code" id="codeGearStroke"></span>
-  </div>
-  <div class="grp">
-    <span class="sw" id="swSetFill"></span>
-    <label>设置槽填充</label>
-    <label>H<input type="range" id="setFillH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="setFillS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="setFillL" min="0" max="100" step="1"></label>
-    <span class="code" id="codeSetFill"></span>
-  </div>
-  <div class="grp">
-    <span class="sw" id="swSetStroke"></span>
-    <label>设置槽描边</label>
-    <label>H<input type="range" id="setStrokeH" min="0" max="360" step="1"></label>
-    <label>S<input type="range" id="setStrokeS" min="0" max="100" step="1"></label>
-    <label>L<input type="range" id="setStrokeL" min="0" max="100" step="1"></label>
-    <span class="code" id="codeSetStroke"></span>
-  </div>
 </div>
 <!-- 加载顺序不可随意调整：util.js 必须排在最前面，因为 config.js 在文件顶层就要用 hslToRgb 算配色端点，
        state.js 在文件顶层要调用缓动函数，两者都要用到工具函数；把工具函数提到最前，这两处才都不会落空 -->
@@ -330,6 +348,8 @@
 <script src="js/labels.js"></script>
 <script src="js/texts.js"></script>
 <script src="js/selection.js"></script>
+<script src="js/stack.js"></script>
+<script src="js/search.js"></script>
 <script src="js/ghost.js"></script>
 <script src="js/debug.js"></script>
 <script src="js/camera.js"></script>

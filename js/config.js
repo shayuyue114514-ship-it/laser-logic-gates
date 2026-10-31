@@ -4,7 +4,7 @@
 /* ========== 常量配置 ========== */
 
 const CONFIG = {
-  appVersion: "1.0.0.001",    // 应用版本号：唯一一处定义，首页副标题、离线缓存与发布包都以它为准；内部号每次改动末位加一
+  appVersion: "1.0.0.002",    // 应用版本号：唯一一处定义，首页副标题、离线缓存与发布包都以它为准；内部号每次改动末位加一
   gridUnit: 1,            // 网格基本单位：1 个世界单位 = 1 格，也是永远显示的最小格子
   gridLineRatio: 0.03,    // 网格线宽 = 格宽 × 这个比例 + gridLineBase，上限 1 CSS px
   gridLineBase: 0.22,     // 上式里的固定加数（CSS px）：线细到 0.25 px 上下就看不见了，靠它兜住，缩到多小也画得出来
@@ -108,6 +108,7 @@ const CONFIG = {
   toastHold: 3,                 // 中间提示框停留多久才开始淡出（秒）：到点自己走，不用手点关闭
   toastFade: 0.3,               // 中间提示框淡出的时长（秒）：读完就干脆退场，不留拖尾
   toastFontSize: 13,            // 中间提示框的字号（CSS px）：比悬停小窗大一号，是一句要正眼读的话
+  touchLongPressMs: 500,        // 触屏长按多久算「删除」（毫秒）：短了容易在放置时误删，长了又等得不耐烦
   minScale: 1,            // 最小缩放：1 世界单位 = 1 CSS px（再小连元件轮廓也落到亚像素上，格子里已没有可看的东西）
   maxScale: 400,          // 最大缩放：1 世界单位 = 400 CSS px
   wheelZoomRate: 0.0015,  // 滚轮 deltaY → 缩放指数的系数
@@ -354,36 +355,12 @@ const RGB = {
   searchFlashStroke: hslToRgb(COLOR.searchLitFlashStroke)   // 闪光峰值时的描边
 };
 
-// 调试面板里元件那两组滑块的取色沙盒：初值从上面的实际配色拷一份，面板一打开显示的就是当前颜色
-// 和面板里其他组一样已经解绑：拖滑块只改这里的值与色块，画面始终取 elementHSL
-const elementSandbox = {
-  fill: Object.assign({}, elementHSL.fill),
-  stroke: Object.assign({}, elementHSL.stroke)
-};
-
-// 上方面板底板的取色沙盒：初值就等于 COLOR.panelFill 对应的 hsl(199, 100%, 74%)
-// 这三个数已经和实际渲染解绑，拖动只改沙盒的色块和色值文本，底板颜色始终取 COLOR.panelFill
-const panelHSL = { h: 199, s: 100, l: 74 };
-
-// 面板选项槽的取色沙盒：初值就等于 COLOR.slotFill 对应的 hsl(200, 100%, 79%)
-// 和 panelHSL 一样已经和实际渲染解绑，拖动只改沙盒的色块和色值文本，槽填充始终取 COLOR.slotFill
-const slotHSL = { h: 200, s: 100, l: 79 };
-
 // 设置齿轮与它所在槽的实际配色：画面取这里，是真正的颜色来源
 const settingsHSL = {
   gearFill: { h: 207, s: 89, l: 55 },    // 齿轮填充：初值同元件填充
   gearStroke: { h: 210, s: 80, l: 42 },  // 齿轮描边：初值同元件描边
   slotFill: { h: 200, s: 100, l: 79 },   // 设置槽底板填充：初值同元件槽填充
   slotStroke: { h: 199, s: 92, l: 56 }   // 设置槽底板描边：初值同元件槽描边
-};
-
-// 调试面板里那四组滑块的取色沙盒：初值从上面的实际配色拷一份，所以面板一打开显示的就是当前颜色
-// 但两者已经解绑：拖滑块只改这里的值和面板上的色块，画面始终取 settingsHSL，调参不会误改实际颜色
-const settingsSandbox = {
-  gearFill: Object.assign({}, settingsHSL.gearFill),
-  gearStroke: Object.assign({}, settingsHSL.gearStroke),
-  slotFill: Object.assign({}, settingsHSL.slotFill),
-  slotStroke: Object.assign({}, settingsHSL.slotStroke)
 };
 
 // 元件选择面板各槽放的类型：下标即类型下标，第一个元件槽放的就是第 0 个类型

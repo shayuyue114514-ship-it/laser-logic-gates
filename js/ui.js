@@ -59,7 +59,18 @@ function initRightBarTools() {
     } else if (i === 2) {
       // 第三格是「清除激光」：把画面上现存的激光与灯的亮起一次抹掉，按钮本身不保留选中态
       box.appendChild(buildClearLaserIcon());
-      box.addEventListener("click", function () { clearLaserField(); });
+      box.addEventListener("click", function () {
+        clearLaserField();
+        showToast("已清除所有激光");   // 这一步画面上只少了光，用一句提示确认动作真的发生了
+      });
+    } else if (i === 3) {
+      // 第四格是「堆叠」：选中一批元件后点它，浮出堆叠设置框；开着再点等于取消
+      box.appendChild(buildStackIcon());
+      box.addEventListener("click", function () { toggleStackPanel(); });
+    } else if (i === 4) {
+      // 第五格是「查找」：点它开或关视口右上角的查找设置框；框里按选区里的元件组合去整份电路里找同样的组合
+      box.appendChild(buildSearchIcon(COLOR.tipName));
+      box.addEventListener("click", function () { toggleSearchPanel(); });
     } else {
       // 点击落到第几格就选中第几格：闭包里的 i 是当次生成的值，不会随循环变化
       box.addEventListener("click", function () { selectRightTool(i); });
@@ -116,31 +127,81 @@ function buildRunIcon(color) {
   return svg;
 }
 
-// 「清除激光」图标：蓝底上放一枚反相器符号，形状直接取项目里那个元件的路径，不另画一套
-// 底板做成深一档的蓝圆角方块，与工具栏浅蓝格子分得开；符号用槽的浅蓝填充、深蓝描边，缩到 21px 仍清楚
+// 「清除激光」图标：一道淡蓝激光束被两道红斜杠划断，形状与配色照搬项目根目录那份图标原文件
+// 原图是画在 A4 页面上的毫米坐标，这里整段抄用原坐标，再用一次变换把它摆进 20×20 的图标框：
+// 先移到原图形的几何中心，再等比放大到约 13 像素宽，最后落到图标框中央；比例与层叠关系都不改动
 function buildClearLaserIcon() {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 20 20");
   svg.setAttribute("class", "rb-ico rb-ico-clear");
-  // 蓝色底板：整枚图标做成一个小徽标
-  const plate = document.createElementNS(SVG_NS, "rect");
-  plate.setAttribute("x", "1.4");
-  plate.setAttribute("y", "1.4");
-  plate.setAttribute("width", "17.2");
-  plate.setAttribute("height", "17.2");
-  plate.setAttribute("rx", "4");
-  plate.setAttribute("fill", COLOR.iconPlate);
-  svg.appendChild(plate);
-  // 反相器：直接读元件类型里那份路径，整体缩放到约 13px 高，居中放在底板上
+  // 原图范围：横向 106.634～118.777，纵向 139.352～149.386，中心 (112.706, 144.369)
   const g = document.createElementNS(SVG_NS, "g");
-  g.setAttribute("transform", "translate(10 10) scale(18)");
-  const sym = document.createElementNS(SVG_NS, "path");
-  sym.setAttribute("d", elementPathD("inverter"));
-  sym.setAttribute("fill", COLOR.iconSymbolFill);
-  sym.setAttribute("stroke", COLOR.iconSymbolStroke);
-  sym.setAttribute("stroke-width", "0.06");   // 世界单位，乘以 18 后约 1px
-  sym.setAttribute("stroke-linejoin", "round");
-  g.appendChild(sym);
+  g.setAttribute("transform", "translate(10 10) scale(1.4) translate(-112.706 -144.369)");
+  // 光束外层：一条较粗的蓝长条
+  const beam = document.createElementNS(SVG_NS, "rect");
+  beam.setAttribute("x", "106.63428");
+  beam.setAttribute("y", "142.39221");
+  beam.setAttribute("width", "12.142752");
+  beam.setAttribute("height", "3.9532723");
+  beam.setAttribute("fill", COLOR.iconClearBeam);
+  g.appendChild(beam);
+  // 光束内芯：同宽、略矮、略深的一条，叠在外层上形成光带的中芯
+  const core = document.createElementNS(SVG_NS, "rect");
+  core.setAttribute("x", "106.63428");
+  core.setAttribute("y", "143.00395");
+  core.setAttribute("width", "12.142752");
+  core.setAttribute("height", "2.7297897");
+  core.setAttribute("fill", COLOR.iconClearBeamInner);
+  g.appendChild(core);
+  // 两道红色斜杠：原图的路径数据原样搬来，斜度与间距都不改
+  const slash = document.createElementNS(SVG_NS, "path");
+  slash.setAttribute("d", "m 115.64192,139.35184 -2.41484,2.69337 h 3.12332 l 2.41484,-2.69337 z" +
+    " m -6.58151,7.34115 -2.41433,2.69286 h 3.12333 l 2.41432,-2.69286 z");
+  slash.setAttribute("fill", COLOR.iconClearSlash);
+  g.appendChild(slash);
+  svg.appendChild(g);
+  return svg;
+}
+
+// 「堆叠」图标：三枚同形的楔子朝右上错开叠在一起，形状、偏移与配色都照搬根目录那份图标文件
+// 原图用毫米坐标：每枚是 0.45×0.61 的局部图形放大约 37 倍，相邻两枚错开 6、3 毫米
+// 顶部那道圆弧走的是大弧，圆头整个探到 y≈-0.365 一带，三枚合起来是 33.2 宽、37.8 高的一道竖长形
+// 这里保留内层的局部坐标与各自那份矩阵，只在外层用一次变换把整体等比摆进 20×20 的图标框
+// 外层变换的中心按含描边的真实外框取 (102.532, 122.663)；缩放取 0.49 使整体约 18.5 高，框内四边都留出余量
+// 绘制顺序也照搬原文件：由浅到深依次画，深色的最后落笔，压在最上面
+function buildStackIcon() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("class", "rb-ico rb-ico-stack");
+  const g = document.createElementNS(SVG_NS, "g");
+  g.setAttribute("transform", "translate(10 10) scale(0.49) translate(-102.532 -122.663)");
+  // 一枚楔子的局部轮廓：底边在 y=0.365，顶点朝上，中间那段圆弧是顶部的圆头
+  const d = "m -0.225,0.365 0.179354,-0.478277 a 0.13,0.13 0 1 1 0.091292,0 L 0.225,0.365 Z";
+  const layers = [
+    { tx: 108.53172, ty: 119.66293, fill: COLOR.iconStackLight },  // 最上一枚：配色最浅
+    { tx: 102.532, ty: 122.66293, fill: COLOR.iconStackMid },      // 中间一枚
+    { tx: 96.531745, ty: 125.66313, fill: COLOR.iconStackDeep }    // 最下一枚：配色最深，画在最后
+  ];
+  for (let i = 0; i < layers.length; i++) {
+    const L = layers[i];
+    // 每枚自己的缩放与位置：原图就是四个矩阵值，按同一份照抄
+    const one = document.createElementNS(SVG_NS, "g");
+    one.setAttribute("transform", "matrix(37.141677 0 0 37.435446 " + L.tx + " " + L.ty + ")");
+    // 先画带描边的那份：描边露在轮廓外侧，把相邻两枚分开
+    const outlined = document.createElementNS(SVG_NS, "path");
+    outlined.setAttribute("d", d);
+    outlined.setAttribute("fill", L.fill);
+    outlined.setAttribute("stroke", COLOR.iconStackStroke);
+    outlined.setAttribute("stroke-width", "0.12");
+    outlined.setAttribute("stroke-linejoin", "round");
+    one.appendChild(outlined);
+    // 再叠一份纯填充的：盖住描边内侧那一半，只剩外面一圈，与原图的层叠效果一致
+    const solid = document.createElementNS(SVG_NS, "path");
+    solid.setAttribute("d", d);
+    solid.setAttribute("fill", L.fill);
+    one.appendChild(solid);
+    g.appendChild(one);
+  }
   svg.appendChild(g);
   return svg;
 }
@@ -194,6 +255,30 @@ function buildStepIcon(color) {
   return svg;
 }
 
+// 「查找」的图标：一枚放大镜，圆环加一根斜向手柄
+// 圆环取描边不填充，手柄从圆环右下沿接出去并取圆头，两者粗细一致，缩到 21px 也看得出是一枚镜子
+function buildSearchIcon(color) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("class", "rb-ico rb-ico-search");
+  const ring = document.createElementNS(SVG_NS, "circle");
+  ring.setAttribute("cx", "8.6");
+  ring.setAttribute("cy", "8.6");
+  ring.setAttribute("r", "5.2");
+  ring.setAttribute("fill", "none");
+  ring.setAttribute("stroke", color);
+  ring.setAttribute("stroke-width", "2");
+  svg.appendChild(ring);
+  const handle = document.createElementNS(SVG_NS, "path");
+  handle.setAttribute("d", "M12.4 12.4 L16.2 16.2");
+  handle.setAttribute("fill", "none");
+  handle.setAttribute("stroke", color);
+  handle.setAttribute("stroke-width", "2.4");
+  handle.setAttribute("stroke-linecap", "round");
+  svg.appendChild(handle);
+  return svg;
+}
+
 // 「前进一步」：只结算一个微帧，元件间那 1 微帧的延迟照旧，与正常运行走的是同一套逻辑
 // 运行中点它先切到暂停，否则下一帧时钟立刻把这一步推走，单步的效果看不出来
 // 余数一并清零：暂停期间攒下的时间若留着，恢复运行时会一次性补算成几十个微帧
@@ -238,6 +323,47 @@ function selectRightTool(index) {
   }
 }
 
+/* ========== 中间提示 ========== */
+
+// 提示框的外观一次性注入：底色、描边、文字色取与弹窗同一套，淡出时长与配置保持一处定义
+function initToastDom() {
+  S.toastDom.style.background = COLOR.tipFill;
+  S.toastDom.style.borderColor = COLOR.tipBorder;
+  S.toastDom.style.color = COLOR.tipName;
+  S.toastDom.style.fontSize = CONFIG.toastFontSize + "px";
+  S.toastDom.style.transitionDuration = CONFIG.toastFade + "s";
+}
+
+// 在网格视口正中报一句短话：停留三秒后自己淡出，淡完再把容器收起来
+// 连着报几句时倒计时从最后一句重新数；已经在显示就直接换字，不重放淡入，免得多说一句就闪一下
+function showToast(text) {
+  const dom = S.toastDom;
+  dom.textContent = text;
+  // 每次弹出都按当前视口重新定位：窗口刚换过尺寸时，提示框仍落在网格区域的中心
+  const vp = getViewport();
+  dom.style.left = (vp.x + vp.w / 2) + "px";
+  dom.style.top = (vp.y + vp.h / 2) + "px";
+  if (!dom.classList.contains("show")) {
+    dom.style.display = "block";
+    // 先让浏览器把「刚显示、全透明」认作当前状态，下一帧再加可见类，淡入才会真的走过渡
+    requestAnimationFrame(function () {
+      dom.classList.add("show");
+    });
+  }
+  clearTimeout(S.toastHoldTimer);
+  clearTimeout(S.toastFadeTimer);
+  // 停留倒计时：到点摘掉可见类，透明度按样式表里那条过渡落到 0，这就是「三秒后淡出」
+  S.toastHoldTimer = setTimeout(function () {
+    S.toastHoldTimer = 0;
+    dom.classList.remove("show");
+    // 淡完再收起来：留在画面上的透明空壳虽然不接点击，但不必一直挂着
+    S.toastFadeTimer = setTimeout(function () {
+      S.toastFadeTimer = 0;
+      dom.style.display = "none";
+    }, CONFIG.toastFade * 1000);
+  }, CONFIG.toastHold * 1000);
+}
+
 /* ========== 弹出面板（设置 / 文件） ========== */
 
 // 弹窗位置：右边缘与所锚定按钮槽的右内沿对齐，顶边贴在上方面板矩形下边缘之下
@@ -279,6 +405,7 @@ function initSettingsPanelDom() {
   S.speedSliderDom.addEventListener("input", onSpeedSliderInput);
   S.renderPrecisionSliderDom.addEventListener("input", onRenderPrecisionInput);
   S.zoomRefreshSliderDom.addEventListener("input", onZoomRefreshInput);
+  S.wheelSwitchDom.addEventListener("click", toggleWheelPan);
   // 滑块的范围与初始位置都由配置推出来：HTML 里不写死刻度，改配置就能整体挪动
   S.speedSliderDom.min = "0";
   S.speedSliderDom.max = String(CONFIG.speedSliderSteps);
@@ -298,6 +425,8 @@ function initSettingsPanelDom() {
   S.zoomRefreshSliderDom.step = "0.05";
   S.zoomRefreshSliderDom.value = String(CONFIG.zoomRefreshDefault);
   updateZoomRefreshLabel();       // 首帧写出阈值读数
+  // 全部控件都摆好之后才读回上次的设置：上面这几句定的是默认值，读回的那几项会覆盖掉它们
+  loadSettings();
 }
 
 // 初始化文件弹窗：注入通用外观，接上三个按钮，并把本地文件读写能力的检测结果写进那一行

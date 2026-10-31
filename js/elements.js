@@ -75,16 +75,21 @@ function placeElement(wx, wy, dir, typeId) {
     angle: dir * 90, angleTarget: dir * 90,  // 初始角度就是放置时的朝向，动画从静止开始
     deleting: false, deleteP: 0,
     on: false,  // 光源的开关状态：由外部点击切换，默认关；只有光源类型会读它
+    offPending: false,  // boolean：光源被别的光照到之后的记号，下一微帧开头会据此把开关归零
     // 下面三项是配色缓存：填充色、描边色、描边宽度。只在选中进度或亮起进度变过时重算一次，
     // 大电路里绝大多数元件每一帧都命中缓存，不必每帧拼一遍颜色字符串
     fillCss: "", strokeCss: "", strokeW: 0,
     selected: false, // 是否被选中：选中即离地，该元件退出电路模拟（不挡光也不发光），落位取消选中时才回到电路里
     litK: -1,        // number：上一次算配色时的选中进度（0 常态、1 全选中）；初值取 -1，逼第一帧先算一次
     litK2: -1,       // number：上一次算配色时的亮起进度；与 litK 一起当缓存键，灯以外的元件恒为 0
+    litK3: -1,       // number：上一次算配色时的查找染色程度；不在查找结果里恒为 0，闪光时每帧都在变
     litIn: false,    // boolean：本微帧有没有被激光照到；只由结算层写，灯以外的元件不读
     litP: newEased(0), // Object：灯的亮起缓动进度标量，0 不亮、1 全亮；只有灯会推进它
     selP: newEased(0), // Object：选中缓动进度标量，0 常态、1 全选中，在固定时长内走缓出曲线
     selBase: false,  // 拉框按下那一刻的选中快照：按住 Shift 框选时以它为基准做翻转，框动来动去也不会反复横跳
+    // number：元件最后一次被画进缓存位图的那一代图；-1 表示还没进过任何一张
+    // 「它在不在当前这张位图里」只看这一项，不再拿动画状态去猜，两个判据合并成一个，画面不会出现「两边都没画」
+    cacheGen: -1,
     // 拉框途中「现在松手会不会被选中」的预览：true 会选上、false 会取消、null 表示没在预览
     // 它只影响画面高亮，绝不改 selected，所以没松手时元件看着像是选中了，实则仍在电路里照常挡光发光
     selPreview: null,
@@ -214,6 +219,8 @@ function elementNeedsFrame(el) {
   if (el.mvOffU !== 0 || el.mvOffV !== 0) return true;                     // 拖动缓动没归零
   if (el.orbitU0 !== null) return true;                                    // 公转中
   if (el.labelText !== "") return true;                                    // 有标签：文字每帧都要画
+  // 落在查找结果里的元件：本体要染成橘黄，闪光期间染色深浅每帧都在变，也必须单独画
+  if (searchTintFor(el) > 0) return true;
   return false;
 }
 
@@ -228,6 +235,7 @@ function rebuildActiveEls() {
     const el = S.activeEls[i];
     if (elementNeedsFrame(el)) continue;   // 还要单独画的元件与这件事无关
     if (S.elemCacheDirty) break;             // 位图本来就要整张重建，补画没有意义
+    if (el.cacheGen === S.elemCacheGen) continue;   // 已经在位图里了，不必再补
     if (!patchBaseElementIntoCache(el)) { invalidateElementCache(); break; }
   }
   S.activeEls.length = 0;
@@ -244,20 +252,32 @@ function rebuildActiveEls() {
 function refreshElementColors(el) {
   const kSel = el.selP.cur;
   const kLit = el.litP.cur;
-  if (el.litK === kSel && el.litK2 === kLit && el.fillCss !== "") return;
+  const kSearch = searchTintFor(el);   // 查找染色程度：0 表示不在结果里，取值由 search.js 按组与闪光进度算
+  if (el.litK === kSel && el.litK2 === kLit && el.litK3 === kSearch && el.fillCss !== "") return;
   el.litK = kSel;
   el.litK2 = kLit;
+  el.litK3 = kSearch;
   if (el.typeId === "lamp") {
     // 灯另走一套：亮起时在 RGB 里把常态色逐通道混向淡红，等价于盖一层淡红遮罩淡入，中间不会绕色环
-    const fill = mixRgb(mixRgb(RGB.elementFill, RGB.lampFill, kLit), RGB.selectFill, kSel);
-    const stroke = mixRgb(mixRgb(RGB.elementStroke, RGB.lampStroke, kLit), RGB.selectStroke, kSel);
+    let fill = mixRgb(mixRgb(RGB.elementFill, RGB.lampFill, kLit), RGB.selectFill, kSel);
+    let stroke = mixRgb(mixRgb(RGB.elementStroke, RGB.lampStroke, kLit), RGB.selectStroke, kSel);
+    // 进了查找结果就直接换成橘黄一族：不再从灯的淡红里往回混，免得两种暖色叠成一团脏色
+    if (kSearch > 0) {
+      fill = searchTintFill(kSearch);
+      stroke = searchTintStroke(kSearch);
+    }
     el.fillCss = rgbCss(fill);
     el.strokeCss = rgbCss(stroke);
   } else {
-    const fill = mixHslTriple(elementHSL.fill, selectLitHSL.fill, kSel);
-    const stroke = mixHslTriple(elementHSL.stroke, selectLitHSL.stroke, kSel);
-    el.fillCss = hslCss(fill);
-    el.strokeCss = hslCss(stroke);
+    // 没进查找结果时照旧走 HSL 三段混合：常态、选中两档在色相上是近邻，直接插值不会串色
+    if (kSearch > 0) {
+      // 进了结果：整个元件换成橘黄一族，不从蓝底上混过去，所以不会出现经绿、经灰的中间色
+      el.fillCss = rgbCss(searchTintFill(kSearch));
+      el.strokeCss = rgbCss(searchTintStroke(kSearch));
+    } else {
+      el.fillCss = hslCss(mixHslTriple(elementHSL.fill, selectLitHSL.fill, kSel));
+      el.strokeCss = hslCss(mixHslTriple(elementHSL.stroke, selectLitHSL.stroke, kSel));
+    }
   }
   // 描边宽度跟着选中进度一起从常态加粗到选中值，取消选中时原样退回
   el.strokeW = CONFIG.elementStroke + (CONFIG.elementStrokeSelected - CONFIG.elementStroke) * kSel;
@@ -364,6 +384,8 @@ function paintBatchFlush(c) {
 // 位图按屏幕坐标作画，同时记下左上角对应的世界坐标，所以平移之后仍能算出它该贴在哪
 function buildElementCache(vp) {
   const dpr = effectiveDpr();
+  // 每重建一次换一代：元件上记的代号跟不上这一代，就说明它不在当前这张图里，叠加层要补画它
+  const gen = ++S.elemCacheGen;
   const pad = CONFIG.elemCachePadPx;
   const w = Math.max(1, Math.ceil(vp.w + pad * 2));
   const h = Math.max(1, Math.ceil(vp.h + pad * 2));
@@ -429,6 +451,7 @@ function buildElementCache(vp) {
     const sy = worldToScreenY(el.wy) - oy;
     if (sx < -reach || sx > w + reach || sy < -reach || sy > h + reach) { culledN++; continue; }
     drawnN++;
+    el.cacheGen = gen;   // 记下它进了这一代图：叠加层从此不再重复画它
     refreshElementColors(el);
     // 任何缩放下都画完整轮廓，不按尺寸做简化：缩得再小，形状与朝向也是看得出来的信息
     const sp = elementSprite(el.typeId, ((el.angle % 360) + 360) % 360, el.fillCss, el.strokeCss, el.strokeW);
@@ -464,6 +487,10 @@ function patchBaseElementIntoCache(el) {
   c.setTransform(dpr, 0, 0, dpr, 0, 0);             // 位图内部一律按 CSS 像素作画，与整张重建时同一套
   // 贴图位置与整张重建时同样按物理像素取整，补进去的那一个与重画出来的逐像素一致
   c.drawImage(sp.cv, (Math.round(sx * dpr) - sp.halfDev) / dpr, (Math.round(sy * dpr) - sp.halfDev) / dpr, sp.css, sp.css);
+  el.cacheGen = S.elemCacheGen;   // 位图里现在有它了，叠加层不必再补画
+  // 位图变了就得请一帧渲染：场景此时往往已经静止，不置脏的话这次补画要等到下次有动静才被贴出来，
+  // 中间那段时间元件只在位图里、屏幕上还是空的，看上去就是「消失了一会儿」
+  S.sceneDirty = true;
   return true;
 }
 
@@ -550,7 +577,9 @@ function renderElements() {
     // 只走活跃表：冷淡元件已经在缓存位图里，不必每帧再扫一遍全表去把它们认出来
     for (let i = 0; i < S.activeEls.length; i++) {
       const el = S.activeEls[i];
-      if (isBaseElement(el)) continue;   // 冷淡元件已经在缓存位图里，不重复画
+      // 只有当「当前这张位图里确实有它」且它此刻是冷淡状态时才不重复画；
+      // 刚由热转冷的元件在位图里没有它（代入不同），这一帧仍由叠加层接着画，画面不会空一拍
+      if (el.cacheGen === S.elemCacheGen && isBaseElement(el)) continue;
       if ((el.deleting ? 0 : (el.selected ? 2 : 1)) !== rank) continue;  // 不属于这一档，跳过
       // 删除动画的缓动值同时驱动缩放和透明度；没在删除时恒为 0，等于原样绘制
       const e = el.deleting ? easeOutCubic(el.deleteP) : 0;

@@ -134,12 +134,14 @@ const S = {
   elemCacheDirty: true,  // boolean：结构或选中集变了，下一帧要整张重画
   elemCacheDrawn: 0,  // number：最近一次重建时画进位图的元件数，供性能读数显示
   elemCacheCulled: 0,  // number：最近一次重建时落在位图之外、被跳过的元件数
+  // number：位图的代次，每重建一次加一；元件上记的代号与它相等，就表示「这张图里已经有它了」
+  // 这是「谁在位图里」的唯一判据：叠加层据此决定要不要补画，不再自己拿动画状态去猜
+  elemCacheGen: 0,
   elemCacheCand: [],  // Array<Element>：重建位图时用来收候选元件的复用表，避免每帧新建数组
   elementPathCache: new Map(),  // Map<string, Path2D>：每种元件类型的轮廓，形状与位置缩放无关，建一次就够
   paintBatchMap: new Map(),  // Map<string, Object>：元件批量绘制的桶表，键是「类型+朝向+配色+缩放+透明度」，每批开始时清空
   elemSpriteMap: new Map(),  // Map<string, Object>：冷淡元件的预渲染贴图，键是「类型+朝向+配色+描边宽+缩放」，重建位图时清空
   culledElementCount: 0,  // number：最近一次渲染被视口剔除跳过的元件数
-  paletteUI: null,  // {fill,stroke,panel,slot,gearFill,gearStroke,setFill,setStroke}：调色器面板的 DOM 引用，没初始化前为 null
   ghostNode: null,  // SVGPathElement：虚影节点，路径取当前选中的元件类型
   ghostWX: 0,  // number：虚影当前世界坐标 X（平滑值）
   ghostWY: 0,  // number：虚影当前世界坐标 Y（平滑值）
@@ -160,11 +162,10 @@ const S = {
   pointerSY: 0,  // number：指针在画布上的最后屏幕 Y
   pointerInside: false,  // boolean：指针是否停留在画布内
   slotHoverIndex: -1,  // number：指针当前悬停的选项槽序号，-1 表示没悬停在任何槽上
-  slotPressedIndex: -1,  // number：指针正按住的选项槽序号，-1 表示没按住任何槽
   slotKeyPressIndex: -1,  // number：键盘刚选中的槽序号，-1 表示没有正在播的键盘按下反馈
   slotKeyPressTimer: 0,  // number：键盘按下反馈还要持续多少秒，走完后那个槽自动退回常态缩放
   slotSelectedIndex: ELEMENT_SLOT_BASE + 1,  // number：当前选中的槽序号，默认第一个元件槽的下一格（透射器），手上的虚影即该类型
-  slotAnim: [],  // Array<Object>：每个槽一个缓动标量（newEased 建的），值即该槽当前的缩放比例
+  slotEls: [],  // Array<HTMLElement>：面板槽与三个按钮按槽序号排在一起，悬停、选中与键盘反馈都按这个数组找节点
   slotHoverTime: 0,  // number：指针在当前槽上已停留的秒数；换槽或移出立即归零，简介的延迟按它算
   tipIndex: -1,  // number：简介浮层当前显示的槽序号，-1 表示没有浮层
   marqueePressing: false,  // boolean：左键已在画布上按下，但还没判定是单击还是拉框
@@ -233,6 +234,13 @@ const S = {
   tipDomName: document.getElementById("slotTipName"),  // HTMLElement：浮层里的元件名称
   tipDomDesc: document.getElementById("slotTipDesc"),  // HTMLElement：浮层里的元件说明
   tipDomIndex: -1,  // number：浮层里已写入的槽序号，-1 表示内容为空；序号没变就不重复写文本
+  panelDom: document.getElementById("topPanel"),  // HTMLElement：顶部元件面板的底板，位置与尺寸按视口摆
+  panelSlotsDom: document.getElementById("panelSlots"),  // HTMLElement：面板左侧那一排选项槽的容器
+  panelButtonsDom: document.getElementById("panelButtons"),  // HTMLElement：面板右侧三个按钮的容器
+  bottomBarDom: document.getElementById("bottomBar"),  // HTMLElement：底部栏底板
+  hintDom: document.getElementById("bottomBarHint"),  // HTMLElement：底栏里那行操作提示
+  hintDomText: null,  // string|null：底栏当前写入的提示文字，null 表示还没写过；文字没变就不重复写 DOM
+  hintDomWidth: 0,  // number：上一次量提示宽度时的窗口宽度，窗口一变就要重新量一次
   settingsOpen: false,  // boolean：设置是否处于打开状态，默认关着；目前只驱动按钮发亮，还没有要打开的界面
   settingsLitAnim: newEased(0),  // Object：设置按钮的提亮进度标量，0 常态、1 全亮；跟随设置的开合状态
   settingsPanelDom: document.getElementById("settingsPanel"),  // HTMLElement：设置弹窗容器，独立于 Canvas 的 DOM 层
@@ -244,6 +252,9 @@ const S = {
   rightToolSelected: -1,  // number：右侧工具栏当前选中的格号，-1 表示一个都没选；只影响外观
   rightToolRunning: true,  // boolean：右侧工具栏第一格（状态槽）当前是不是「运行中」，初始为运行
   rightBarTipTimer: 0,  // number：工具栏名称小窗的延时句柄，0 表示没有排着的显示任务
+  toastDom: document.getElementById("centerToast"),  // HTMLElement：屏幕中间的小提示框，文字由 showToast 写进去
+  toastHoldTimer: 0,  // number：提示框停留倒计时的句柄，0 表示没有排着的任务；再来一句时先作废它
+  toastFadeTimer: 0,  // number：淡出结束后把容器收起来的句柄，0 表示没有排着的任务
   sidebarResumeHandle: null,  // FileSystemDirectoryHandle|null：上次的工作区文件夹，还差一次点击才能继续访问时先记在这里，空状态里据此摆出「继续打开」
   sidebarTipDom: document.getElementById("sidebarTip"),  // HTMLElement：列表里悬停时那个写全名的小窗，固定在窗口坐标上
   sidebarTipRow: null,  // HTMLElement|null：小窗当前是在哪一行上冒出来的；同一行内挪动就不必重摆一次
@@ -278,6 +289,48 @@ const S = {
   confirmModalAnim: newEased(0),  // Object：确认弹窗的显隐进度标量，0 全隐、1 全显；与教程弹窗同一档时长
   confirmOpen: false,  // boolean：确认弹窗当前是否开着，由 askConfirm / settleConfirm 成对改写
   confirmResolve: null,  // Function|null：等在弹窗背后的那段流程留下来的作答入口；null 表示没人在等
+  // 堆叠设置框：点右侧工具栏的「堆叠」时浮在网格正中，随相机缩放平移；改动时画布上同步显示将要叠出来的虚影
+  stackPanelDom: document.getElementById("stackPanel"),  // HTMLElement：堆叠设置框容器
+  stackPanelOpen: false,  // boolean：堆叠设置框当前是否开着
+  stackCount: CONFIG.stackDefaultCount,  // number：堆叠次数（含原来那一批），至少 1
+  stackDX: CONFIG.stackDefaultDX,  // number：每多叠一层在 X 方向挪几格
+  stackDY: CONFIG.stackDefaultDY,  // number：每多叠一层在 Y 方向挪几格（世界 Y 向上为正）
+  stackMirrorOn: false,  // boolean：每多叠一层是否把那一层整体左右翻一次
+  stackReplaceOn: false,  // boolean：叠出来的副本是否顶掉目标格上原有的元件；关着时那一格直接跳过
+  stackAnchorWX: 0,  // number：设置框锚定的世界横坐标，打开时取视口正中，之后跟着地图一起走
+  stackAnchorWY: 0,  // number：设置框锚定的世界纵坐标
+  stackDragWX: 0,  // number：设置框被拖动后相对锚点在世界横轴上的位移
+  stackDragWY: 0,  // number：设置框被拖动后相对锚点在世界纵轴上的位移
+  stackDragging: false,  // boolean：是否正在拖动设置框
+  stackDragPointerId: -1,  // number：正在拖框的指针 id，-1 表示没有
+  stackDragStartWX: 0,  // number：按下那一刻指针所在的世界横坐标
+  stackDragStartWY: 0,  // number：按下那一刻指针所在的世界纵坐标
+  stackDragBaseWX: 0,  // number：按下那一刻已经积累的世界横向位移
+  stackDragBaseWY: 0,  // number：按下那一刻已经积累的世界纵向位移
+  stackPanelW: 0,  // number：设置框未缩放时的屏幕宽度，打开时量一次，用于把框心摆到锚点上
+  stackPanelH: 0,  // number：设置框未缩放时的屏幕高度
+  stackCountInputDom: document.getElementById("stackCount"),  // HTMLInputElement：堆叠次数输入框
+  stackDXInputDom: document.getElementById("stackDX"),  // HTMLInputElement：X 偏移输入框
+  stackDYInputDom: document.getElementById("stackDY"),  // HTMLInputElement：Y 偏移输入框
+  stackMirrorDom: document.getElementById("stackMirror"),  // HTMLElement：「每次镜像」开关的滑轨
+  stackReplaceDom: document.getElementById("stackReplace"),  // HTMLElement：「替换重叠的元件」开关的滑轨
+  // 查找设置框：点右侧工具栏第五格的放大镜后贴在网格视口右上角，不随地图移动
+  // 搜索按选区里的元件组合在整份电路里找同样的组合，页码那一行用来逐个定位结果
+  searchPanelDom: document.getElementById("searchPanel"),  // HTMLElement：查找设置框容器
+  searchGoDom: document.getElementById("searchGo"),  // HTMLElement：放大镜按钮
+  searchModeDom: document.getElementById("searchMode"),  // HTMLElement：准确/模糊的切换选项
+  searchPageDom: document.getElementById("searchPage"),  // HTMLElement：页码文字，形如「1/12」
+  searchPrevDom: document.getElementById("searchPrev"),  // HTMLElement：上一个结果的箭头
+  searchNextDom: document.getElementById("searchNext"),  // HTMLElement：下一个结果的箭头
+  searchTipDom: document.getElementById("searchTip"),  // HTMLElement：放大镜按钮变灰时的那句解释
+  searchPanelOpen: false,  // boolean：查找设置框当前是否开着
+  searchFuzzy: false,  // boolean：搜索方式，false 为准确（类型与朝向都要一致），true 为模糊（只比类型）
+  searchResults: [],  // Array<Object>：本机缓存的结果，每项是 {u,v,w,h,cells}，cells 是这份结果占的格子
+  searchCellMap: null,  // Map<string, number> | null：格号 → 结果序号；给元件染色时按格反查它属于哪一组
+  searchIndex: 0,  // number：当前定位到第几个结果（从 0 起）；只按页码显示，不参与匹配
+  searchFlashOn: false,  // boolean：定位到某个结果后那两下闪光是否还在播
+  searchFlashT: 0,  // number：闪光已经播了多少秒
+  searchEnabled: false,  // boolean：上一次同步时搜索按钮是否可用，只在状态变化时才去改类名
   fileNameDom: document.getElementById("fileName"),  // HTMLElement：文件弹窗里显示当前存档名字的那行文字
   btnOpenDom: document.getElementById("btnOpen"),  // HTMLElement：文件弹窗里的「打开」按钮
   btnSaveDom: document.getElementById("btnSave"),  // HTMLElement：文件弹窗里的「保存」按钮
@@ -295,6 +348,8 @@ const S = {
   gridRenderOn: true,  // boolean：是否绘制网格线，默认开；关掉只隐藏网格线，视口底色与边框照旧
   advSwitchDom: document.getElementById("advSwitch"),  // HTMLElement：设置弹窗里「高级渲染」开关的滑轨
   advancedRenderOn: true,  // boolean：是否启用高级渲染，默认开；目前只控制激光外围的辉光，关掉只剩光芯
+  wheelSwitchDom: document.getElementById("wheelSwitch"),  // HTMLElement：设置弹窗里「滚轮平移」开关的滑轨
+  wheelPanOn: false,  // boolean：滚轮是否改为平移，默认关（滚轮仍是缩放）；触控板捏合始终是缩放
   renderSkip: { elements: false, lampGlow: false, laserGlow: false, laser: false },
   speedSliderDom: document.getElementById("speedSlider"),  // HTMLElement：设置弹窗里「运行速度」滑块
   speedValueDom: document.getElementById("speedValue"),  // HTMLElement：速度数值显示，在滑块右边
@@ -304,7 +359,8 @@ const S = {
   zoomRefreshValueDom: document.getElementById("zoomRefreshValue"),  // HTMLElement：缩放刷新速度数值显示，在滑块右边
   microDt: CONFIG.microframeDt,  // number：当前每个微帧对应的真实时长（秒），0 表示不设延迟；由速度滑块改写
   renderPrecision: CONFIG.renderPrecisionDefault,  // number：当前渲染精度
-  renderScaleCap: renderPrecision / CONFIG.renderPrecisionPerX,  // number：画布像素比上限，由精度换算
+  // 默认像素比上限按默认精度换算；这里不能写变量名，S 还没建好，只能直接读配置
+  renderScaleCap: CONFIG.renderPrecisionDefault / CONFIG.renderPrecisionPerX,  // number：画布像素比上限，由精度换算
   zoomRefreshLimit: CONFIG.zoomRefreshDefault,  // number：放大重画的阈值倍数
   historyStack: [],  // Array<Array<Object>>：历史里每一步的差分清单
   historyIndex: -1,  // number：当前走到历史里的哪一步，-1 表示还停在起点、没有可撤销的步
@@ -330,6 +386,12 @@ const state = {
   panPointerId: null,     // number|null：正在拖拽的指针 id
   panLastX: 0,            // number：上一次 pointermove 的屏幕 X，用来自己算位移
   panLastY: 0,            // number：上一次 pointermove 的屏幕 Y
+  touchPointers: [],      // Array<{id,x,y}>：画布上按着的触点，0 根是没碰、1 根是拖动与长按、2 根是平移加捏合
+  touchMoved: false,      // boolean：本次触摸是否挪动过，挪过就不再算单击放置
+  touchMidX: 0,           // number：两指中点的屏幕 X，平移时用它跟手移动
+  touchMidY: 0,           // number：两指中点的屏幕 Y
+  touchDist: 0,           // number：两指间距，缩放时与上一刻比出倍率
+  touchLongTimer: 0,      // number：长按删除的计时器编号，0 表示没在计时
   lastTs: 0               // number：上一帧时间戳（毫秒），用于计算 dt
 };
 

@@ -24,6 +24,73 @@ function onSpeedSliderInput() {
   S.microAcc = 0;
   updateSpeedValueLabel();
   S.sceneDirty = true;
+  saveSettings();   // 调过的速度下次打开编辑器还在
+}
+
+// 设置存在本地存储的这一处：键名固定，存的是用户真正调过的那几项，与存档（电路内容）完全分开
+const SETTINGS_KEY = "laser-gate:settings:v1";   // string：设置的本地存储键
+
+// 把当前设置写进本地存储：速度、渲染精度、缩放刷新阈值、网格、高级渲染、滚轮行为
+// 只写这六项：它们都是「工作环境偏好」，换个文档打开也该照旧；存档与视野属于文档内容，不进这里
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      speedStep: Number(S.speedSliderDom.value),   // 存滑块刻度而不是秒数：刻度与映射是一一对应的，读回来不必反算
+      renderPrecision: S.renderPrecision,
+      zoomRefresh: S.zoomRefreshLimit,
+      grid: S.gridRenderOn,
+      advanced: S.advancedRenderOn,
+      wheelPan: S.wheelPanOn
+    }));
+  } catch (err) {
+    // 存储不可用（隐私模式、配额满）时静默放弃：设置只在本次会话里生效，不影响页面继续用
+  }
+}
+
+// 读回上次的设置并摆到控件上：每一项都单独校验，坏掉的那一项退回默认值，不因一条脏数据把整组设置作废
+// 必须在控件范围与初始值都摆好之后才调用，滑块读回来才有地方落
+function loadSettings() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+  } catch (err) {
+    saved = null;   // 没存过或存的不是合法 JSON：当作什么都没调过
+  }
+  if (saved === null || typeof saved !== "object" || Array.isArray(saved)) return;
+  if (typeof saved.grid === "boolean") {
+    S.gridRenderOn = saved.grid;
+    S.gridSwitchDom.classList.toggle("on", saved.grid);
+  }
+  if (typeof saved.advanced === "boolean") {
+    S.advancedRenderOn = saved.advanced;
+    S.advSwitchDom.classList.toggle("on", saved.advanced);
+  }
+  if (typeof saved.wheelPan === "boolean") {
+    S.wheelPanOn = saved.wheelPan;
+    S.wheelSwitchDom.classList.toggle("on", saved.wheelPan);
+  }
+  if (isFiniteNumber(saved.speedStep)) {
+    S.speedSliderDom.value = String(clamp(Math.round(saved.speedStep), 0, CONFIG.speedSliderSteps));
+    onSpeedSliderInput();   // 走同一段处理：速度、数值显示、余数清零只维护这一份
+  }
+  if (isFiniteNumber(saved.renderPrecision)) {
+    const p = clamp(saved.renderPrecision, CONFIG.renderPrecisionMin, CONFIG.renderPrecisionMax);
+    S.renderPrecisionSliderDom.value = String(p);
+    onRenderPrecisionInput();
+  }
+  if (isFiniteNumber(saved.zoomRefresh)) {
+    const z = clamp(saved.zoomRefresh, CONFIG.zoomRefreshMin, CONFIG.zoomRefreshMax);
+    S.zoomRefreshSliderDom.value = String(z);
+    onZoomRefreshInput();
+  }
+}
+
+// 切换「滚轮平移」：默认关，滚轮仍是缩放；开了之后滚轮按普通滚动去平移画面
+// 触控板双指捏合始终按缩放走，不受这一项影响，所以没有中键的设备也能两个方向都用
+function toggleWheelPan() {
+  S.wheelPanOn = flipSwitch(S.wheelSwitchDom);
+  S.sceneDirty = true;
+  saveSettings();
 }
 
 // 更新速度数值显示：零延迟单独写「极速」，其余一律用秒、固定两位小数，单位统一才好横向比较
@@ -57,6 +124,7 @@ function onZoomRefreshInput() {
   S.zoomRefreshLimit = Number(S.zoomRefreshSliderDom.value);
   updateZoomRefreshLabel();
   S.sceneDirty = true;
+  saveSettings();
 }
 
 // 更新缩放刷新速度读数：带乘号、固定两位小数，1.40× 表示位图放到 1.4 倍时重画
@@ -76,12 +144,14 @@ function flipSwitch(el) {
 function toggleGridRender() {
   S.gridRenderOn = flipSwitch(S.gridSwitchDom);
   S.sceneDirty = true;
+  saveSettings();
 }
 
 // 切换「高级渲染」：只改状态与开关外观；激光不在任何缓存里，标记重绘就能立刻看到变化
 function toggleAdvancedRender() {
   S.advancedRenderOn = flipSwitch(S.advSwitchDom);
   S.sceneDirty = true;
+  saveSettings();
 }
 
 // 每帧同步一个弹窗：位置跟着视口走，显隐与透明度直接取它锚定按钮的提亮进度

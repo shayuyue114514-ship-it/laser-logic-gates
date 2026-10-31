@@ -100,7 +100,7 @@ function isFiniteNumber(v) {
 function parseScene(raw) {
   // 整份文件不可用的几种情况统一从这里返回，免得每个分支各写一遍
   const reject = function (reason) {
-    return { ok: false, reason: reason, view: null, elements: [], texts: [], skipped: [] };
+    return { ok: false, reason: reason, version: 0, view: null, elements: [], texts: [], skipped: [] };
   };
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return reject("不是本程序的存档");
   if (raw.format !== SCENE_FORMAT) return reject("不是本程序的存档");
@@ -162,7 +162,7 @@ function parseScene(raw) {
     if (typeof t.text !== "string" || t.text.trim() === "") { skipped.push({ reason: "文字内容为空", raw: t }); continue; }
     textList.push({ wx: t.x, wy: t.y, text: t.text });
   }
-  return { ok: true, reason: "", view: view, elements: list, texts: textList, skipped: skipped };
+  return { ok: true, reason: "", version: raw.version, view: view, elements: list, texts: textList, skipped: skipped };
 }
 
 // 清空画布上所有元件并复位模拟状态：读档前必须走一遍，否则旧电路会和读进来的叠在一起
@@ -222,7 +222,9 @@ function applyScene(parsed) {
   // 中途反相器还要翻几下，像是激光乱了套；这里走的是与「极速」同一条路：逻辑语义完全一样，只是不再等真实时间
   // 各元件的发射掩码在上面已经按存档写回，所以这一步不是在「点火」，只是把接收掩码与激光场补齐
   // 若反过来让它从全灭的状态自己推：反相器会按「没有输入就发射」先吐光，那道光进了闭合的环就再也出不来
-  runToQuiescence();
+  // 版本 1、2 的存档里没有记录运行时状态：按裁定打开时一律保持全不发射，不推演一遍把光点亮，
+  // 用户看到的是与文件里一致的全暗画面，点一下运行后再由电路自己算出该亮的那些光
+  if (parsed.version >= 3) runToQuiescence();
   S.sceneDirty = true;
 }
 

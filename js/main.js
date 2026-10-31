@@ -9,7 +9,7 @@ function frame(ts) {
   const scriptStart = performance.now();  // 脚本耗时起点：包住本帧全部更新与渲染，读数里的「脚本」就是它
   const dt = state.lastTs ? Math.min((ts - state.lastTs) / 1000, 0.1) : 0; // 钳制 dt，避免切回标签页时跳变
   state.lastTs = ts;
-  let t0 = pt(); updateCamera(dt); updateSlotAnim(dt); updateSlotTip(dt); pe("相机与选项槽", t0);
+  let t0 = pt(); updateCamera(dt); updateSlotAnim(dt); updateSlotTip(dt); updateStackPanelTransform(); updateSearchFlash(dt); syncSearchPanel(); pe("相机与选项槽", t0);  // 堆叠设置框每帧按相机重摆，平移缩放时才会跟着地图走；查找框钉在视口右上角，闪光按帧推进
   // 每帧只重建一次活跃表：这一帧里所有「还要推进、还要单独画」的元件都从这张小表上走
   // 判据读的是此刻的真实状态，所以上一帧的输入改了什么，这一帧立刻就照顾到
   t0 = pt(); rebuildActiveEls(); pe("重建活跃表", t0);
@@ -48,11 +48,15 @@ function init() {
   setupSidebarTree();  // 再把存档列表画出来并接上开合；列表目前是一份示意结构，不接任何真实文件
   resetView();
   initElementLayer();
+  initPanelDom();       // 顶部面板与底栏：建槽与按钮、注入配色变量、摆位置，交互与状态同步交给 slots.js
   initSlotTipDom();
+  initToastDom();        // 屏幕中间的小提示框：外观只注入一次，之后由 showToast 负责写话与淡出
   initSettingsPanelDom();
   initFilePanelDom();
   initTutorialPanelDom();
   initConfirmPanelDom();  // 确认弹窗的外观与两个作答按钮，与教程弹窗同一套底板，只做一次
+  initStackPanelDom();    // 堆叠设置框：控件绑定与外观注入，只做一次，之后开关只改显隐
+  initSearchDom();        // 查找设置框：外观与按钮绑定，只做一次，之后开关只改显隐
   initLabelEditorDom();   // 元件标签的输入框：外观与确认弹窗同一套，键盘与两个按钮都只在这一处绑定
   initTextField();        // 浮动文本的原地输入框：内容变化、输入法三段、两个按键与失焦都只在这一处绑定
   setupDebugPanel();

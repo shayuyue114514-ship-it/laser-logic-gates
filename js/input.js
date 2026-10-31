@@ -29,13 +29,130 @@ function cmdKeyHeld(e) {
   return e.metaKey || e.ctrlKey || S.metaHeld || S.ctrlHeld;
 }
 
+/* ========== 触屏（本轮最小可用：单指平移、双指捏合缩放、轻点放置或选择、长按删除） ========== */
+
+// 从记着的触点里找出某个指针编号对应的那一条，找不到返回 null
+function touchFind(id) {
+  for (let i = 0; i < state.touchPointers.length; i++) {
+    if (state.touchPointers[i].id === id) return state.touchPointers[i];
+  }
+  return null;
+}
+
+// 撤掉长按计时：手指一动或抬起都要撤，否则会迟半秒删掉一个刚放下的元件
+function touchClearLongPress() {
+  if (state.touchLongTimer === 0) return;
+  clearTimeout(state.touchLongTimer);
+  state.touchLongTimer = 0;
+}
+
+// 手指按下：一根手指准备「轻点放置」或「长按删除」，两根手指进入平移加捏合
+function touchDown(e) {
+  state.touchPointers.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
+  S.canvas.setPointerCapture(e.pointerId);   // 手指移出画布也能继续收到移动
+  if (state.touchPointers.length === 2) {
+    touchClearLongPress();   // 第二根手指落下：这次触摸就是缩放平移，不再算轻点
+    state.touchMoved = true; // 双指手势用过之后，抬手指不该顺手放下一个元件
+    const a = state.touchPointers[0];
+    const b = state.touchPointers[1];
+    state.touchMidX = (a.x + b.x) / 2;
+    state.touchMidY = (a.y + b.y) / 2;
+    state.touchDist = Math.hypot(b.x - a.x, b.y - a.y);   // 两指间距，缩放按它的倍率走
+    return;
+  }
+  if (state.touchPointers.length !== 1) return;  // 三根以上不处理
+  state.touchMoved = false;
+  state.touchLongTimer = setTimeout(function () {
+    state.touchLongTimer = 0;
+    if (state.touchMoved) return;   // 已经开始拖动，这不是长按
+    // 长按删除：按「看到谁在最上面就删谁」的顺序，先文字后元件
+    if (!deleteTextAtScreen(e.clientX, e.clientY)) deleteElementAtScreen(e.clientX, e.clientY);
+    state.touchMoved = true;   // 这一下已经用掉，抬手指不再放置
+  }, CONFIG.touchLongPressMs);
+}
+
+// 手指移动：单指平移，双指同时平移并缩放
+function touchMove(e) {
+  const p = touchFind(e.pointerId);
+  if (p === null) return;
+  const dx = e.clientX - p.x;
+  const dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (Math.abs(dx) > 4 || Math.abs(dy) > 4) state.touchMoved = true;   // 越过一点抖动才算拖动
+  if (state.touchPointers.length === 1) {
+    if (!state.touchMoved) return;   // 还在长按判定期，画面不动
+    touchClearLongPress();
+    state.tAnchorSX += dx;   // 单指平移：参考点的屏幕位置跟着手指走
+    state.tAnchorSY += dy;
+    S.sceneDirty = true;
+    return;
+  }
+  if (state.touchPointers.length !== 2) return;
+  const a = state.touchPointers[0];
+  const b = state.touchPointers[1];
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+  // 先按中点位移平移，再绕中点缩放：两步都只改参考点与缩放目标，平滑动画仍由相机自己追
+  state.tAnchorSX += midX - state.touchMidX;
+  state.tAnchorSY += midY - state.touchMidY;
+  if (state.touchDist > 0) zoomAt(midX, midY, dist / state.touchDist);
+  state.touchMidX = midX;
+  state.touchMidY = midY;
+  state.touchDist = dist;
+}
+
+// 手指抬起：没有挪动过就当作一次轻点，放元件或选中元件
+function touchUp(e) {
+  const p = touchFind(e.pointerId);
+  if (p === null) return;
+  state.touchPointers.splice(state.touchPointers.indexOf(p), 1);
+  touchClearLongPress();
+  if (state.touchPointers.length === 1) {
+    // 双指变单指：接下来的单指移动只平移，不再触发长按；间距清零，免得下次两指用到旧值
+    state.touchDist = 0;
+    state.touchMoved = true;
+    return;
+  }
+  if (state.touchPointers.length !== 0) return;
+  if (state.touchMoved) return;   // 挪动过或长按过了：抬手指不再放置
+  // 轻点：与鼠标左键在画布上的语义一致，先看工具，再按「点在谁上面就操作谁」
+  S.pointerSX = e.clientX;
+  S.pointerSY = e.clientY;
+  if (selectToolActive()) { selectAtPointer(false); S.sceneDirty = true; return; }
+  if (textToolActive()) { onTextToolClick(e.clientX, e.clientY); S.sceneDirty = true; return; }
+  if (findElementAtPointer() !== null) toggleLightAtPointer();
+  else placeElementAtScreen(e.clientX, e.clientY);
+  S.sceneDirty = true;
+}
+
+// 触摸被系统打断：收掉触点与计时，重新回到「没碰画布」的状态
+function touchCancel(e) {
+  const p = touchFind(e.pointerId);
+  if (p !== null) state.touchPointers.splice(state.touchPointers.indexOf(p), 1);
+  touchClearLongPress();
+  if (state.touchPointers.length === 0) {
+    state.touchMoved = false;
+    state.touchDist = 0;
+  }
+}
+
 // 绑定全部输入事件；init 只执行一次，所以监听器不会被重复注册
 function setupInput() {
-  // 滚轮缩放：deltaMode 为 1 时单位是「行」，换算成像素再做指数缩放
+  // 滚轮：默认缩放；设置里打开「滚轮平移」后改为平移画面
+  // 触控板双指捏合会带上 ctrlKey，那一种永远按缩放走：没有中键的设备也能既平移又缩放
   S.canvas.addEventListener("wheel", function (e) {
     e.preventDefault();
-    const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
-    zoomAt(e.clientX, e.clientY, Math.exp(-delta * CONFIG.wheelZoomRate));
+    const unit = e.deltaMode === 1 ? 16 : 1;   // 以「行」为单位时换算成像素，再按同一条曲线处理
+    if (e.ctrlKey || !S.wheelPanOn) {
+      zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * unit * CONFIG.wheelZoomRate));
+      return;
+    }
+    // 平移：滚动方向与画面移动方向相反，向下滚动时世界整体上移，于是看得到更下面的内容
+    state.tAnchorSX -= e.deltaX * unit;
+    state.tAnchorSY -= e.deltaY * unit;
+    S.sceneDirty = true;
   }, { passive: false });
 
   // 中键按下：阻止浏览器自动滚动，并开始拖拽视野
@@ -79,21 +196,10 @@ function setupInput() {
     // 不在这里先记一笔的话，这一下就不会被吃掉，会接着去放置元件或拉框，变成「点一下收尾顺带又干了别的」
     const wasTextEditing = S.textEditing;
     S.canvas.focus();
-    // 左键：先判是不是点在选项槽上（是则选中该槽并进入按下态、不放置），否则在指针所在格心放置元件
+    // 触屏走另一条路：单指拖是平移、双指是捏合缩放、轻点是放置或选择、长按是删除
+    if (e.pointerType === "touch") { touchDown(e); return; }
+    // 左键：画布上只剩「操作画面」这一种语义，选项槽与三个按钮已经不在这张画布上，各自收自己的点击
     if (e.button === 0) {
-      const hit = slotIndexAt(e.clientX, e.clientY);
-      if (hit >= 0) {
-        // 点选项槽是带着明确目标的一下，与「点画布空白」分开对待：
-        // 输入还开着就先把它收下（失焦那一步多半已经收过了，重复调用没事），然后照常选槽，这一下不被吃掉
-        // 若把这一下也吞掉，用户要连点两下才切得动工具，会以为槽坏了
-        if (wasTextEditing) endTextEditing(true);
-        if (S.labelEditorOpen) closeLabelEditor(true);
-        S.slotPressedIndex = hit;  // 按下态：只缩得更深，不改亮度，避免按下时闪一下
-        // 两个按钮只是「长得像槽」，它们不是可选项：不能改选中项，否则虚影会去查一个不存在的元件
-        // 选中槽与元件槽都能选中；从选中工具切到别的工具时，选区会被立刻收掉（元件就地落位）
-        if (isPickableSlot(hit)) setSelectedSlot(hit);
-        return;
-      }
       // 画布上的其余位置：正在原地编辑浮动文本时，这一下只用来把输入收下，不再去拉框或放置
       // 用户点到别处，本意就是结束这次输入；收下而不是丢弃，是因为不小心点到空白会把刚敲的一段话弄丢
       // 上面那次失焦多半已经收过了，endTextEditing 内部会认出这种情况直接走开，不会重复写一遍
@@ -175,9 +281,8 @@ function setupInput() {
     S.pointerSX = e.clientX;
     S.pointerSY = e.clientY;
     S.pointerInside = true;
-    S.sceneDirty = true;  // 指针位置变了，虚影与槽悬停都可能跟着变，强制重绘一次
-    // 同步选项槽的悬停状态：命中判定与绘制共用 panelSlotRect，两边不会算歪
-    updateSlotHoverAt(e.clientX, e.clientY);
+    S.sceneDirty = true;  // 指针位置变了，虚影可能跟着变，强制重绘一次
+    if (e.pointerType === "touch") { touchMove(e); return; }   // 触屏：平移与捏合缩放走另一条路
     moveMarquee(e);  // 拉框与拖视野是两个互斥的指针操作，各认各的指针 id，互不干扰
     moveSelectionDrag(e);  // 拖动选中元件同理，也是各认各的指针 id
     moveLabelDrag(e);      // 拖标签同理：四种指针操作各认各的 id，同时只有一个能真的动起来
@@ -201,44 +306,20 @@ function setupInput() {
     // 鼠标从框里移出来落到画布上也会走到这里，这一抢会把焦点从输入框夺走，接着就打不进字了
     // 编辑期间本来也不需要画布的键盘：这一刻用户要敲的是字，不是 WASD
     if (!S.textEditing && !S.labelEditorOpen) S.canvas.focus();
-    S.sceneDirty = true;  // 指针可能正好从槽上进入画布，槽的悬停状态与虚影都要立刻反映出来
-    // 这里也判一次槽的悬停，避免要等第一次移动才生效
-    updateSlotHoverAt(e.clientX, e.clientY);
+    S.sceneDirty = true;  // 虚影要立刻反映指针位置，必须重绘一次
+    // 槽的悬停由槽自己收事件：指针落在面板上时根本不会触发这里的进入
   });
 
   // 指针离开画布：标记为不在画布内，虚影随之隐藏
+  // 槽的悬停由槽自己的离开事件清掉，这里不再越界去动面板的状态
   S.canvas.addEventListener("pointerleave", function () {
     S.pointerInside = false;
-    S.sceneDirty = true;  // 虚影要消失、槽要复位，这些变化必须重绘一次才看得到
-    // 离开画布也要清掉槽的悬停与按下，否则槽会一直停在缩小状态回不去
-    S.slotHoverIndex = -1;
-    S.slotPressedIndex = -1;
-    S.slotHoverTime = 0;  // 停留计时一并归零，重新进入时要重新数 1.4 秒
+    S.sceneDirty = true;  // 虚影要消失，这个变化必须重绘一次才看得到
   });
 
   // 结束拖拽：释放捕获并清空拖拽状态
   S.canvas.addEventListener("pointerup", function (e) {
-    // 设置按钮：松开时指针仍停在按钮上才算一次有效点击（按下后拖走再松手不算）
-    // 只切换设置自己的开合状态，不去开合调试面板 —— 那个面板是调参用的，跟设置是两回事
-    if (S.slotPressedIndex === SETTINGS_SLOT_INDEX && S.slotHoverIndex === SETTINGS_SLOT_INDEX) {
-      S.settingsOpen = !S.settingsOpen;
-      S.filePanelOpen = false;  // 弹窗互斥：开一个就把另外两个关掉，避免底板叠在一起、也保证同时只有一个按钮亮着
-      S.tutorialOpen = false;
-    }
-    // 文件按钮：判定规则与设置按钮完全一致，同样是「按下又松开在同一按钮上」才算一次点击
-    if (S.slotPressedIndex === FILE_SLOT_INDEX && S.slotHoverIndex === FILE_SLOT_INDEX) {
-      S.filePanelOpen = !S.filePanelOpen;
-      S.settingsOpen = false;   // 同上，反向互斥
-      S.tutorialOpen = false;
-    }
-    // 教程按钮：判定规则同前两个按钮，按下又松开在同一按钮上才算一次点击
-    // 打开时屏幕正中弹出教程窗口；一并把另外两个弹窗关掉，三个按钮同一时刻只有一个亮着
-    if (S.slotPressedIndex === TUTORIAL_SLOT_INDEX && S.slotHoverIndex === TUTORIAL_SLOT_INDEX) {
-      S.tutorialOpen = !S.tutorialOpen;
-      S.settingsOpen = false;
-      S.filePanelOpen = false;
-    }
-    S.slotPressedIndex = -1;  // 不论哪个键松开都退出按下态，所以放在提前 return 之前
+    if (e.pointerType === "touch") { touchUp(e); return; }   // 触屏抬手指：轻点才放置，挪动过就不放
     // 拉框收尾放在最前：松开左键必须把拉框结掉，否则框会一直挂在屏幕上
     if (e.pointerId === S.marqueePointerId) endMarquee(e);
     if (e.pointerId === S.movePointerId) endMove(e);  // 拖动收尾：清落点被覆盖的元件并复位状态
@@ -250,7 +331,7 @@ function setupInput() {
 
   // 指针被系统取消（如触控被中断）时也要收尾，否则会卡在拖拽态或按下态
   S.canvas.addEventListener("pointercancel", function (e) {
-    S.slotPressedIndex = -1;  // 系统取消不算一次点击，只退出按下态
+    if (e.pointerType === "touch") { touchCancel(e); return; }   // 触屏被打断：只收触点与计时
     if (e.pointerId === S.marqueePointerId) cancelMarquee(e);  // 拉框也要一并收掉，否则框会留在屏幕上
     if (e.pointerId === S.movePointerId) cancelMove(e);  // 拖动被系统打断：元件退回原位再收状态
     if (e.pointerId === S.labelPointerId) cancelLabelDrag(e);  // 拖标签被打断：标签退回按下时的方位
@@ -269,6 +350,11 @@ function setupInput() {
   // 标签页切回来时画布内容可能已被系统丢弃，强制重绘一次，避免留下一片空白
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) S.sceneDirty = true;
+  });
+
+  // 从浏览器缓存里恢复页面时画布内容同样是旧快照甚至空白，这时也请一帧重画
+  window.addEventListener("pageshow", function (e) {
+    if (e.persisted) S.sceneDirty = true;
   });
 
   // 粘贴：只在这里挂一次，挂在 document 上而不是画布上——焦点落在哪个元素都能收到
@@ -300,6 +386,21 @@ function setupInput() {
     // 位置排在模态窗口之后、其余快捷键之前：先让模态窗口说了算，再轮到文本框
     // 少了这一句，框里打出的 w a s d 会被当成旋转、数字会被当成选槽、s 会被当成保存，
     // 而且是先拦掉默认行为再处理，字根本进不了框，看上去就像焦点压根没进去
+    // 堆叠设置框开着时，只认 Esc 当作取消；其余键一律放行给输入框，不再走画布快捷键
+    // 放在文本框判据之前：焦点正停在数字框里时，Esc 也要能把这个框关掉
+    if (S.stackPanelOpen) {
+      if (e.code === "Escape") {
+        e.preventDefault();
+        closeStackPanel();
+      }
+      return;
+    }
+    // 查找设置框不是模态：只接 Esc 把它收起来，其余键照常给画布
+    if (S.searchPanelOpen && e.code === "Escape") {
+      e.preventDefault();
+      closeSearchPanel();
+      return;
+    }
     if (isTextEntry(e.target)) return;
     // Cmd+S / Ctrl+S：保存。放在最前面拦，因为这是全局快捷键，与指针在不在画布上无关
     // 必须拦掉默认行为，否则浏览器会弹「保存网页」的框，把页面本身存成一个文件
@@ -434,7 +535,7 @@ function setupInput() {
     if (isTextEntry(e.target)) return;
     // 让路规则与按下那一步完全一致：模态窗口开着时，快捷键一律不响应
     // 少了这一句，按下被挡掉、抬起却补存一次，同一个按法会因为按的长短得出不同结果
-    if (S.confirmOpen || S.tutorialOpen) return;
+    if (S.confirmOpen || S.tutorialOpen || S.stackPanelOpen) return;
     if (!cmdKeyHeld(e)) return;   // 抬起时也没按着 Cmd/Ctrl，说明这一下就是普通的 s（转朝向），不管
     onSaveFile();
   });

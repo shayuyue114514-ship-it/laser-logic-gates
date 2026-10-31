@@ -23,11 +23,8 @@ function isSceneSettled() {
   // 相机：吸附后当前值与目标值相等，不等就说明还在平移或缩放
   if (state.anchorSX !== state.tAnchorSX || state.anchorSY !== state.tAnchorSY) return false;
   if (state.logScale !== state.tLogScale) return false;
-  // 选项槽的缩放缓动：任一槽没停稳就还在动
-  for (let i = 0; i < S.slotAnim.length; i++) {
-    if (S.slotAnim[i].t < 1) return false;
-  }
-  // 两个按钮的提亮：它们的缩放已经在上面那轮槽里查过了，这里只需补上提亮，否则动画会卡在半路
+  // 选项槽的缩放已经交给样式表的过渡，不再是逐帧推进的缓动，这里不必再查
+  // 两个按钮的提亮仍按缓动标量走：它们同时驱动弹窗透明度，动画没走完就要继续渲染
   if (S.settingsLitAnim.t < 1) return false;
   if (S.fileLitAnim.t < 1) return false;
   if (S.tutorialLitAnim.t < 1) return false;  // 教程按钮的提亮同样要查，否则动画会卡在半路不动
@@ -41,6 +38,8 @@ function isSceneSettled() {
   if (S.textEditing) return false;
   // 简介浮层：动画没走完就还在动
   if (S.tipAnim.t < 1) return false;
+  // 查找定位后的那两下闪光没播完就还在变，不能整帧跳过渲染
+  if (S.searchFlashOn) return false;
   // 元件：删除动画进行中、朝向还在转、选中缓动没走完、或拖动缓动还差一点没追上，都要继续渲染
   // 只走活跃表：这一帧还有动静的元件都在这张表里，十万个元件里静止的那些不必每帧再判一遍
   // 缓动刚被改过的那一帧不必在这里再判一次：上面那几趟推进刚刚把它们的目标起步了，t 已经不是 1
@@ -67,10 +66,12 @@ function render() {
   let t0 = pt(); S.ctx.clearRect(0, 0, state.cssW, state.cssH); drawGrid(vp); pe("渲染/网格", t0);  // 先整体清成白底，视口外自然就是空白
   t0 = pt(); drawLaser(vp); pe("渲染/激光", t0);  // 激光在网格之上、元件之下
   t0 = pt(); drawLampGlow(vp); pe("渲染/灯光晕", t0);  // 灯光晕压在激光之上、元件之下：既能柔化照到灯上的激光，又不会盖住灯本体
-  t0 = pt(); drawViewportBorder(vp); drawPanelBox(vp); drawBottomBar(vp); drawBottomBarHint(vp); pe("渲染/底板边框", t0);
-  t0 = pt(); drawPanelSlots(vp); renderSlotTip(vp); pe("渲染/元件面板", t0);
+  t0 = pt(); drawViewportBorder(vp); pe("渲染/视口边框", t0);
+  // 面板与底栏是 DOM：这里只把状态与文字同步过去，不再在画布上画任何界面元素
+  t0 = pt(); syncPanelStates(); syncBottomBarHint(); renderSlotTip(vp); pe("渲染/面板与底栏", t0);
   t0 = pt(); renderPanels(vp); renderTutorialPanel(); renderConfirmPanel(); renderLabelEditor(); syncTextEditField(); pe("渲染/弹窗浮层", t0);
   t0 = pt(); renderElements(); pe("渲染/元件层", t0);
+  t0 = pt(); drawStackPreview(); pe("渲染/堆叠虚影", t0);  // 堆叠虚影压在元件之上、标签之下，虚线轮廓不会被本体盖住
   t0 = pt(); drawElementLabels(vp); pe("渲染/标签", t0);  // 标签画在元件之后：压在元件之上
   t0 = pt(); drawTextEditBox(); drawFloatingTexts(vp); drawTextEditCaret(); pe("渲染/浮动文本", t0);
   t0 = pt(); renderGhost(); pe("渲染/虚影", t0);

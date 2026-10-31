@@ -15,6 +15,7 @@ function resizeCanvas() {
   S.canvas.style.height = state.cssH + "px";
   // setTransform 只在这里设置一次；后续所有绘制都用 CSS 像素坐标，避免高清屏模糊
   S.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  syncChromeLayout();  // 面板与底栏的像素位置也跟着视口重算；DOM 还没建好时它自己会跳过
 }
 
 // 计算视口矩形：画布内缩固定边距，网格只在这个矩形内显示
@@ -409,44 +410,6 @@ function drawViewportBorder(vp) {
   S.ctx.restore();
 }
 
-// 画上方元件面板的占位矩形：左右两条边与网格视口边框严格对齐（同 x、同宽度）
-// 线宽和颜色直接沿用视口边框，两者是同一套外框样式，看起来才是一体的
-// +1/-2 的写法和视口边框一致：让 2px 描边整个落在矩形内部，外沿正好压在 vp.x 与 vp.x + vp.w 上
-function drawPanelBox(vp) {
-  const gap = CONFIG.panelGap;
-  const x = vp.x;
-  const w = vp.w;
-  const y = gap;
-  const h = vp.y - gap * 2; // 上下各留 gap，中间才是矩形
-  S.ctx.save();
-  // 底板色硬编码取 COLOR.panelFill，与调试面板的 HSL 滑块解绑：滑块只当取色沙盒，不影响实际渲染
-  // 先铺底色再描边：填充范围同样内缩 1px，正好落在描边内侧，边界上不会露出半像素白边
-  S.ctx.fillStyle = COLOR.panelFill;
-  S.ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
-  S.ctx.lineWidth = 2;
-  S.ctx.strokeStyle = COLOR.border;
-  S.ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-  S.ctx.restore();
-}
-
-// 画底部那条栏：风格与上方元件面板完全一致（同底色、同线宽、同描边色、同样是直角），只是高度减半
-// 左右两条边同样与网格视口边框对齐；上下各留一个 panelGap，整页上下才是对称的
-// 栏内只放一行随状态变化的操作提示，具体文字见 hintText
-function drawBottomBar(vp) {
-  const gap = CONFIG.panelGap;
-  const h = CONFIG.bottomBarHeight;
-  const x = vp.x;
-  const w = vp.w;
-  const y = state.cssH - gap - h;  // 底边离窗口底一个 gap，从下往上量出栏高
-  S.ctx.save();
-  S.ctx.fillStyle = COLOR.panelFill;
-  S.ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
-  S.ctx.lineWidth = 2;
-  S.ctx.strokeStyle = COLOR.border;
-  S.ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-  S.ctx.restore();
-}
-
 // 当前有没有选中的元件：删除动画中的不算，它已经退出模拟，也不该算进选区
 function hasSelectedElement() {
   // 只走活跃表：选中的元件必定在表里，十万个元件里不必为这一句提示扫一遍全表
@@ -492,23 +455,4 @@ function hintText() {
   return "";  // 默认：无提示
 }
 
-// 把提示文字画在底部栏里：单行、垂直居中、左对齐
-// 左内缩取与上方第一个元件槽相同的值，上下两栏的左边缘落在同一条竖线上
-// 用 save/restore 包住，字体与对齐方式不会漏到后面的绘制里去
-function drawBottomBarHint(vp) {
-  const text = hintText();
-  if (text === "") return;  // 默认状态没有提示，栏里就空着
-  const h = CONFIG.bottomBarHeight;
-  const y = state.cssH - CONFIG.panelGap - h;
-  const x = vp.x + 2 + CONFIG.panelSlotPad;
-  S.ctx.save();
-  S.ctx.font = CONFIG.hintFontSize + "px " + UI_FONT;
-  S.ctx.fillStyle = COLOR.hintText;
-  S.ctx.textAlign = "left";
-  S.ctx.textBaseline = "middle";
-  // 窗口太窄时提示会比栏还宽：宁可不显示，也不要让它压到描边上、甚至溢出到栏外
-  if (S.ctx.measureText(text).width > vp.x + vp.w - 16 - x) { S.ctx.restore(); return; }
-  S.ctx.fillText(text, x, y + h / 2);
-  S.ctx.restore();
-}
 

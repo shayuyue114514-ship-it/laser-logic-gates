@@ -42,6 +42,18 @@ function exitSelectTool() {
   applySelection(function () { return false; }, false);
 }
 
+// 判断此刻是否还有东西悬空（被选中）：保存与「复制给 AI」都要在落位前拦下，
+// 因为悬空的元件不写进文件，直接存出去会得到一份少了这批元件的存档
+function selectionHeld() {
+  for (let i = 0; i < S.elements.length; i++) {
+    if (S.elements[i].selected && !S.elements[i].deleting) return true;
+  }
+  for (let i = 0; i < S.texts.length; i++) {
+    if (S.texts[i].selected) return true;
+  }
+  return false;
+}
+
 // ===== 选区框架 =====
 // 「谁被选中」和「选区有没有离地」是两件事：
 // 离地 = 这批元件暂时不跟地图发生占用关系，压在别人的格子上也不会把别人顶掉，画面上允许暂时重叠；

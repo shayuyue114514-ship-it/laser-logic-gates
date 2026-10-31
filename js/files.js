@@ -109,6 +109,8 @@ async function openFromHandle(handle) {
 // 另存为：弹保存框挑一个新文件，把当前电路写进去，并把它记为当前文件
 async function onSaveFileAs() {
   if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); return; }
+  // 悬空的元件不进存档：这时存出去会得到一份少了这批元件的文件，先拦下并提示用户落位
+  if (selectionHeld()) { showToast("选区尚未落位，无法保存"); return; }
   let handle;
   const t0 = performance.now();   // 保存框自己也可能要等：这一段单独计时，好与写盘那几段分开看
   try {
@@ -132,6 +134,7 @@ async function onSaveFileAs() {
 
 // 保存：写回当前文件；还没绑定过文件就退化成另存为，让「保存」永远有结果，不必先去点另存为
 async function onSaveFile() {
+  if (selectionHeld()) { showToast("选区尚未落位，无法保存"); return; }   // 与另存为同一条规矩：先落位再存
   // 起手先记一行：这条路上若有几秒的迟滞，靠它才能分清是「按键没能及时进来」还是「写盘那几步慢」
   // 这一行是同步打出来的，它出现得晚，就说明问题在它之前，与下面几段无关
   console.log("[文件] 保存开始：" + (S.currentFileHandle === null ? "尚未绑定文件，转另存为" : S.currentFileName));
@@ -420,6 +423,8 @@ function serializeSceneText() {
 // 复制的是整份电路而不是选区：给 AI 看电路通常要它看到全貌，只给一半反而看不懂
 async function copyForAi() {
   if (S.elements.length === 0) { console.log("[AI 文本] 画面上还没有元件，没东西可复制"); return; }
+  // 与保存同一条规矩：悬空的元件不在这份文本里，这时复制出去会漏掉一批元件，先拦下并提示
+  if (selectionHeld()) { showToast("选区尚未落位，无法复制"); return; }
   if (!S.canUseClipboard) { console.log("[AI 文本] 当前环境不支持写剪贴板"); return; }
   const text = serializeSceneText();
   try {
