@@ -194,13 +194,22 @@ function clearSelectionPreview() {
   for (let i = 0; i < S.texts.length; i++) S.texts[i].selPreview = null;
 }
 
+// 拉框起点此刻在屏幕上的位置：起点记的是世界坐标，所以中途缩放平移时，框的这一角仍贴着原来那一格地图
+function marqueeStartX() {
+  return worldToScreenX(S.marqueeStartWX);
+}
+
+function marqueeStartY() {
+  return worldToScreenY(S.marqueeStartWY);
+}
+
 // 拉框按下：记下起点并捕获指针，这样指针移出画布甚至移出窗口也能继续收到 move
 function beginMarquee(e) {
   S.marqueePointerId = e.pointerId;
   S.marqueePressing = true;
   S.marqueeActive = false;
-  S.marqueeStartSX = e.clientX;
-  S.marqueeStartSY = e.clientY;
+  S.marqueeStartWX = screenToWorldX(e.clientX);   // 起点存世界坐标，而不是屏幕坐标
+  S.marqueeStartWY = screenToWorldY(e.clientY);
   S.marqueeEndSX = e.clientX;
   S.marqueeEndSY = e.clientY;
   // 按下的这一刻把每个元件的选中状态存一份快照：按住 Shift 框选时的翻转以它为基准，
@@ -216,15 +225,15 @@ function moveMarquee(e) {
   S.marqueeEndSX = e.clientX;
   S.marqueeEndSY = e.clientY;
   if (!S.marqueeActive) {
-    const dx = S.marqueeEndSX - S.marqueeStartSX;
-    const dy = S.marqueeEndSY - S.marqueeStartSY;
+    const dx = S.marqueeEndSX - marqueeStartX();
+    const dy = S.marqueeEndSY - marqueeStartY();
     if (dx * dx + dy * dy < CONFIG.marqueeThreshold * CONFIG.marqueeThreshold) return;
     S.marqueeActive = true;
   }
   // 边拉边亮：每动一下都按当前框重算一遍预览，框到的元件立刻提亮，缩回去的自动退回原样
   // 只写预览、不写选中，所以框还没松手时元件看着像是选中了，实则仍在电路里照常挡光发光
   // 按住 Shift 就切到翻转模式，拖动途中按下或松开 Shift 都能即时切换，不必重新拉框
-  previewInMarquee(marqueeBox(S.marqueeStartSX, S.marqueeStartSY, S.marqueeEndSX, S.marqueeEndSY), e.shiftKey);
+  previewInMarquee(marqueeBox(marqueeStartX(), marqueeStartY(), S.marqueeEndSX, S.marqueeEndSY), e.shiftKey);
   S.sceneDirty = true;  // 框要跟着指针走，每动一下都得重画
 }
 
@@ -234,7 +243,7 @@ function moveMarquee(e) {
 // 单击时把 Shift 状态一并传下去，这样 Shift+单击也能像 Shift+框选那样翻转，两边的规则完全一致
 function endMarquee(e) {
   clearSelectionPreview();  // 预览让位给真实状态，下面立刻写入，中间不留下「亮着却没选中」的一帧
-  if (S.marqueeActive) selectInMarquee(marqueeBox(S.marqueeStartSX, S.marqueeStartSY, S.marqueeEndSX, S.marqueeEndSY), e.shiftKey);
+  if (S.marqueeActive) selectInMarquee(marqueeBox(marqueeStartX(), marqueeStartY(), S.marqueeEndSX, S.marqueeEndSY), e.shiftKey);
   else selectAtPointer(e.shiftKey);
   S.marqueePressing = false;
   S.marqueeActive = false;
@@ -612,13 +621,13 @@ function orbitPoint(u, v, angleDeg) {
   return { u: S.orbitPivotU + du * c + dv * s, v: S.orbitPivotV - du * s + dv * c };
 }
 
-// 画拉框：半透明填充加一圈实线，直接用屏幕坐标画，不参与相机变换
+// 画拉框：半透明填充加一圈实线，直接用屏幕坐标画；起点由世界坐标换算而来，所以缩放时那一角跟着地图走
 function drawMarquee() {
   if (!S.marqueeActive) return;
-  const x = Math.min(S.marqueeStartSX, S.marqueeEndSX);
-  const y = Math.min(S.marqueeStartSY, S.marqueeEndSY);
-  const w = Math.abs(S.marqueeEndSX - S.marqueeStartSX);
-  const h = Math.abs(S.marqueeEndSY - S.marqueeStartSY);
+  const x = Math.min(marqueeStartX(), S.marqueeEndSX);
+  const y = Math.min(marqueeStartY(), S.marqueeEndSY);
+  const w = Math.abs(S.marqueeEndSX - marqueeStartX());
+  const h = Math.abs(S.marqueeEndSY - marqueeStartY());
   S.ctx.save();
   S.ctx.fillStyle = COLOR.selectFill;
   S.ctx.fillRect(x, y, w, h);

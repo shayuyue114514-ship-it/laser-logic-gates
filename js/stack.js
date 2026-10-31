@@ -51,6 +51,19 @@ function initStackPanelDom() {
   });
   syncStackPanelControls();
   setupStackPanelDrag(dom);  // 整块可以拖着走：标题与空白处都能抓，控件让给它们自己的点击
+  // 指针压在设置框上时滚轮照样交给地图：框本身跟着地图走，用户不该先把指针挪出框才能缩放
+  dom.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    const unit = e.deltaMode === 1 ? 16 : 1;   // 以「行」为单位时换算成像素，与画布上的滚轮走同一条曲线
+    if (e.ctrlKey || !S.wheelPanOn) {
+      zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * unit * CONFIG.wheelZoomRate));
+      return;
+    }
+    // 设置里选了「滚轮平移」时，压在框上的滚轮也按平移走，与画布上的行为保持一致
+    state.tAnchorSX -= e.deltaX * unit;
+    state.tAnchorSY -= e.deltaY * unit;
+    S.sceneDirty = true;
+  }, { passive: false });
 }
 
 // 拖动整个设置框：按住框上任意非控件的位置拖，框跟着指针平移
@@ -178,14 +191,24 @@ function closeStackPanel() {
 
 // 按相机把框摆到锚点上：锚点加上拖动位移，都是世界坐标里的事，于是平移缩放时框都贴着同一块地图走
 // 缩放取「当前缩放 ÷ 默认缩放」；摆位直接算缩放后的左上角，不依赖百分比位移与 transform-origin 的叠加顺序
+// 同时把框裁到网格视口内：框跟着地图放大时可能越出画布，不裁的话会压在上方面板与底栏上
 function updateStackPanelTransform() {
   if (!S.stackPanelOpen) return;
   const sx = worldToScreenX(S.stackAnchorWX + S.stackDragWX);
   const sy = worldToScreenY(S.stackAnchorWY + S.stackDragWY);
   const k = state.scale / CONFIG.defaultScale;
-  const halfW = S.stackPanelW * k / 2;   // 缩放后的半边宽：左上角由框心减去它得到
-  const halfH = S.stackPanelH * k / 2;
-  S.stackPanelDom.style.transform = "translate(" + (sx - halfW) + "px, " + (sy - halfH) + "px) scale(" + k + ")";
+  const left = sx - S.stackPanelW * k / 2;   // 缩放后的左上角：由框心减去半边宽得到
+  const top = sy - S.stackPanelH * k / 2;
+  S.stackPanelDom.style.transform = "translate(" + left + "px, " + top + "px) scale(" + k + ")";
+  // 裁剪区在框自身的坐标里算（缩放之前）：把视口矩形换算进框的本地坐标，四边各取到框边界的距离
+  // 四个值都不小于 0：视口若从框内部开始，那一边不从框外收，只从框边收
+  const vp = getViewport();
+  const insetL = Math.max(0, (vp.x - left) / k);
+  const insetT = Math.max(0, (vp.y - top) / k);
+  const insetR = Math.max(0, S.stackPanelW - (vp.x + vp.w - left) / k);
+  const insetB = Math.max(0, S.stackPanelH - (vp.y + vp.h - top) / k);
+  S.stackPanelDom.style.clipPath =
+    "inset(" + insetT + "px " + insetR + "px " + insetB + "px " + insetL + "px)";
 }
 
 // 改动设置后请一帧重画：预览虚影与框中读数都要立刻反映

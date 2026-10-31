@@ -171,8 +171,8 @@ const S = {
   marqueePressing: false,  // boolean：左键已在画布上按下，但还没判定是单击还是拉框
   marqueeActive: false,  // boolean：指针已移过阈值，正在拉框
   marqueePointerId: -1,  // number：拉框所用的指针 id，-1 表示当前没有拉框；move/up 只认它自己的 id
-  marqueeStartSX: 0,  // number：拉框起点屏幕 X，按下那一刻的位置，拉框期间不变
-  marqueeStartSY: 0,  // number：拉框起点屏幕 Y
+  marqueeStartWX: 0,  // number：拉框起点的世界坐标 X，按下那一刻的地图位置，拉框期间不变；缩放平移时那一角跟着地图走
+  marqueeStartWY: 0,  // number：拉框起点的世界坐标 Y
   marqueeEndSX: 0,  // number：拉框终点屏幕 X，跟着指针走
   marqueeEndSY: 0,  // number：拉框终点屏幕 Y
   metaHeld: false,  // boolean：Cmd（Mac）/ Win 键此刻是否按着，由它自己的按下与抬起事件维护
