@@ -26,13 +26,34 @@ async function resumePendingScene() {
   }
   const parsed = parseScene(raw);
   if (!parsed.ok) { console.log("[文件] 从首页带来的存档不可用：" + parsed.reason); showToast("存档无法打开：" + parsed.reason); return; }
-  applyScene(parsed);
-  showSceneView();   // 从首页接过来的存档也算打开了文件，网格区切成画布
-  // 句柄：首页已经把它写进同一个库、同一个键，上一句读完的 lastPickerHandle 就是刚选的那个文件
-  // 这里把它接成「当前文件」，之后点保存仍然直接写回原文件，不必再去选一次
-  if (lastPickerHandle !== null) {
-    S.currentFileHandle = lastPickerHandle;
-    S.currentFileName = lastPickerHandle.name;
+  // 存进内部工作区再打开：首页拿到的只是一段正文，没有工作区里的落处
+  // 先落成一份文件，之后的保存才写得到地方；工作区不可用时就只把画面摆出来，按未保存处理
+  const root = await getWorkspaceRoot();
+  if (root === null) {
+    applyScene(parsed);
+    showSceneView();
+    S.docDirty = true;
+    return;
+  }
+  let name = "未命名" + SAVE_EXT;
+  let seq = 1;
+  try {
+    while (await sidebarEntryExists(root, name)) { name = "未命名-" + seq + SAVE_EXT; seq++; }
+    const handle = await root.getFileHandle(name, { create: true });
+    const stream = await handle.createWritable();
+    await stream.write(text);   // 原文照搬：已经校验过，不必再序列化一遍
+    await stream.close();
+    if (adoptScene(handle, parsed)) {
+      openFilePath = name;
+      markCreated(name, "");
+      await reloadWorkspaceTree();
+      S.openFileNode = findNodeByPath(name);
+    }
+  } catch (err) {
+    console.log("[文件] 首页存档写入工作区失败：", err);
+    applyScene(parsed);
+    showSceneView();
+    S.docDirty = true;
   }
   console.log("[文件] 已接着打开 " + (S.currentFileName || "未命名") +
     (parsed.skipped.length ? "，跳过 " + parsed.skipped.length + " 条坏数据" : ""));
@@ -104,29 +125,34 @@ async function openFromHandle(handle) {
   return adoptScene(handle, parseScene(raw));
 }
 
-// 另存为：弹保存框挑一个新文件，把当前电路写进去，并把它记为当前文件
+// 另存为：在工作区根目录里新建一份存档，把当前电路写进去并记成当前文件
+// 不再弹系统保存框：工作区就在浏览器内部，换一个名字只是一次本地写入，瞬间完成
 async function onSaveFileAs() {
-  if (!canUseLocalFile) { console.log("[文件] 当前浏览器不支持直接写文件"); showToast("当前浏览器不支持写入本地文件"); return; }
   // 悬空的元件不进存档：这时存出去会得到一份少了这批元件的文件，先拦下并提示用户落位
   if (selectionHeld()) { showToast("选区尚未落位，无法保存"); return; }
-  let handle;
-  const t0 = performance.now();   // 保存框自己也可能要等：这一段单独计时，好与写盘那几段分开看
+  const root = await getWorkspaceRoot();
+  if (root === null) { showToast("当前浏览器不支持内部工作区"); return; }
+  const base = S.currentFileName ? S.currentFileName.replace(/\.lccas$/i, "") : "未命名";
   try {
-    handle = await window.showSaveFilePicker(Object.assign({
-      suggestedName: S.currentFileName || ("未命名" + SAVE_EXT),
-      types: SAVE_FILE_TYPES
-    }, startInOption()));
+    // 名字被占了就在后面加序号，不覆盖工作区里已有的那一份
+    let name = base + SAVE_EXT;
+    let seq = 1;
+    while (await sidebarEntryExists(root, name)) { name = base + "-" + seq + SAVE_EXT; seq++; }
+    const handle = await root.getFileHandle(name, { create: true });
+    S.currentFileHandle = handle;
+    S.currentFileName = name;
+    openFilePath = name;
+    markCreated(name, "");
+    S.openFileNode = null;   // 新的一行还没进列表，写完重读后按路径重新绑上
+    await runSave();
+    await reloadWorkspaceTree();
+    const node = S.openFileNode;
+    if (node !== null) { node.dirty = isWorkspaceUnsynced(node.path); paintSidebarDot(node); }
+    console.log("[文件] 已另存为工作区里的 " + name);
   } catch (err) {
-    // 用户按取消不是错误，静默收场；其它错误才报出来，免得一次取消就弹一堆提示
-    if (err.name !== "AbortError") { console.log("[文件] 保存框出错：", err); showToast("保存文件失败，请重试"); }
-    return;
+    console.log("[文件] 另存为失败：", err);
+    showToast("另存为失败，请重试");
   }
-  console.log("[文件] 保存框用时 " + Math.round(performance.now() - t0) + " ms");
-  rememberPickerHandle(handle);  // 记住这次所在的目录，下次保存框直接从这儿起步
-  // 名字和句柄一起记：两者说的都是「现在绑在哪个文件上」，要改就一起改，不能只改一个
-  S.currentFileHandle = handle;
-  S.currentFileName = handle.name;
-  await runSave();
 }
 
 // 保存：写回当前文件；还没绑定过文件就退化成另存为，让「保存」永远有结果，不必先去点另存为
@@ -210,10 +236,15 @@ async function writeCurrentFile() {
     const editsAtWrite = S.docEditSeq;   // 这份内容对应到第几次改动，收尾回来时靠它判断期间有没有又改过
     await stream.write(text);
     const t2 = performance.now();
-    // 走到这里整份内容已经在浏览器手里，界面上就算存好了：呼吸立刻停，未保存的标记立刻灭
-    // 后面那几秒只是系统把临时文件换到原文件上，不该让圆点一直呼吸，也不该让人以为还没存
+    // 走到这里整份内容已经写进内部工作区：呼吸立刻停，内存里那份未保存的标记也灭
     if (S.openFileNode === node && S.docEditSeq === editsAtWrite) S.docDirty = false;
     setNodeSaving(node, false);
+    // 工作区只等于「本地存好」，还没写回用户的文件夹：记一笔待同步，圆点继续亮着提醒去刷新
+    const savedPath = node === null ? openFilePath : node.path;
+    if (savedPath !== "") {
+      markUnsynced(savedPath);
+      if (node !== null) { node.dirty = true; paintSidebarDot(node); }
+    }
     console.log("[文件] 已写入 " + S.currentFileName + "（" + text.length + " 字节，开流 " + Math.round(t1 - t0) +
       " ms，写入 " + Math.round(t2 - t1) + " ms），收尾在后台进行");
     // 收尾交给后台：成功才丢掉内存里那份旧快照；失败就把未保存亮回去，不让界面说谎

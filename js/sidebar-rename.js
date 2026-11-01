@@ -193,13 +193,21 @@ async function commitSidebarRename(rawName) {
       await stream.close();
       await node.handle.remove();
     }
+    const oldPath = node.path;
     node.name = name;
     node.handle = newHandle;
+    refreshTreePaths();   // 名字变了，整棵树的路径跟着重算（文件夹改名时它的所有下级也要一起变）
+    // 旧路径在绑定文件夹里见过：刷新时要删掉对面那一份；新路径随后要写回去
+    if (oldPath !== node.path) {
+      markUnsynced(node.path);
+      if (baselinePaths.indexOf(oldPath) >= 0) markDeleted(oldPath);
+    }
     // 正打开着的那一份跟着换绑：不改的话，下一次保存会按旧名字把它重新写出一份来
     if (wasOpen) {
       S.currentFileHandle = newHandle;
       S.currentFileName = name;
       S.openFileNode = node;
+      openFilePath = node.path;
     }
     cancelSidebarRename();
     buildSidebarTree();   // 列表按名字排序，改名之后位置可能变，整棵重画一次最省心

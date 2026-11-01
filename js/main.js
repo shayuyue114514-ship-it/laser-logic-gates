@@ -45,12 +45,14 @@ function init() {
   S.ctx = S.canvas.getContext("2d");
   resizeCanvas();
   initSidebarDom();  // 先把竖栏的宽度定下来：复位视图时要按「让出竖栏之后」的视口居中
-  setupSidebarTree();  // 再把存档列表画出来并接上开合；列表目前是一份示意结构，不接任何真实文件
+  initWorkspaceBar();  // 工作区顶部四个按钮：导入、拉取、写回、另存为
+  setupSidebarTree();  // 再把存档列表画出来并接上开合；列表读的是浏览器内部工作区
   resetView();
   initElementLayer();
   initPanelDom();       // 顶部面板与底栏：建槽与按钮、注入配色变量、摆位置，交互与状态同步交给 slots.js
   initSlotTipDom();
   initToastDom();        // 屏幕中间的小提示框：外观只注入一次，之后由 showToast 负责写话与淡出
+  initSyncDialogDom();   // 同步到文件夹前的删除确认弹窗：骨架只建一次，每次只换里面的清单
   initSettingsPanelDom();
   initTutorialPanelDom();
   initTextEditorDom();   // 文本编辑器只建一次，双击 .txt / .md 时直接把它摆出来
@@ -66,7 +68,9 @@ function init() {
   // 不在首页跳过来时它只是照常把句柄读回内存，供系统选择器定起始目录，与启动流程没别的牵连
   // 存档接完再把上次的工作区句柄读回来并试着接着打开：两件事互不依赖，但都会重画竖栏，
   // 串起来跑读起来是「先接手上的文档、再接手边的文件夹」这样一条线，也不会出现列表被前后画两遍
-  loadPickerHandle().then(resumePendingScene).then(loadWorkspaceHandle).then(resumeWorkspace);
+  // 先读回绑定文件夹与基线清单，再读上次的文件句柄定选择器的起点；
+  // 接着打开首页送来的存档（它要写进工作区），最后把内部工作区铺进列表
+  loadWorkspaceState().then(loadPickerHandle).then(resumePendingScene).then(resumeWorkspace);
   requestAnimationFrame(frame);
   // 自带的 MiSans 排在样式表之后取：@font-face 就登记在那份样式表里，它没到之前点名取字只会立刻返回空
   // 取到之后标一次脏，下一帧按 MiSans 重画首帧上那些字；顺带报一句「字体落定」给遮挡层

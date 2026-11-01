@@ -243,6 +243,8 @@ async function onSidebarMenuDelete() {
       return;
     }
   }
+  // 记下「工作区里删了一份」：刷新到文件夹时据此删掉对面那一份（对面本来就没有也不算错）
+  markDeleted(node.path);
   // 删掉的可能正是编辑器里打开的那一个，那样必须先把绑定解掉
   // 先按列表记着的那一条判（同一个节点，最直接）；它为空时（当初从系统文件框打开的）再问一次磁盘上的句柄
   // 是不是同一个文件：同一个文件每次拿到的句柄是两个对象，拿它们比相等是比不出来的，要用 isSameEntry
@@ -257,6 +259,7 @@ async function onSidebarMenuDelete() {
     S.currentFileHandle = null;
     S.currentFileName = "";
     S.openFileNode = null;
+    openFilePath = "";
     S.docDirty = true;
     S.docEditSeq++;   // 原来绑着的那份文件没了，画面按未保存算，序号也要往前走
     console.log("[列表] 删掉的正是当前打开的那一个，已解除绑定，画面上的电路按未保存算");

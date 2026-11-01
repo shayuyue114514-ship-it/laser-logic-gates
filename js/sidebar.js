@@ -74,7 +74,7 @@ async function readDirectoryEntries(dirHandle) {
 // 读失败（权限被收回、文件夹已被删掉）时保持未读状态，下次点还会再试一次，不会把节点卡成一片空白
 async function loadSidebarFolder(node) {
   try {
-    node.children = await readDirectoryEntries(node.handle);
+    node.children = await readDirectoryEntries(node.handle, node.path);
     node.loaded = true;
     return true;
   } catch (err) {
@@ -92,8 +92,7 @@ function buildSidebarTree() {
   hideSidebarTip();
   S.sidebarTreeDom.textContent = "";   // 清空走 textContent：不经过 HTML 解析，名称里带什么字符都不会被当成标签
   if (currentTree === null) {
-    // 空状态照资源管理器那种排法自上而下摆：一行标题、一句说明、几条整条宽的按钮
-    // 标题与有工作区时的根目录名同一档字重，但它不可点，所以只是一个普通的行，不带任何交互
+    // 内部工作区打不开时只留一条说明：OPFS 不可用就没有任何落盘能力，摆按钮也做不成事
     S.sidebarTreeDom.className = "is-empty";
     const title = document.createElement("div");
     title.className = "sb-empty-title";
@@ -102,39 +101,13 @@ function buildSidebarTree() {
     title.appendChild(titleIcon);
     const titleText = document.createElement("span");
     titleText.className = "sb-label";
-    titleText.textContent = "无打开的工作区";
+    titleText.textContent = "工作区还没准备好";
     title.appendChild(titleText);
     S.sidebarTreeDom.appendChild(title);
     const hint = document.createElement("div");
     hint.className = "sb-empty-hint";
-    // 有一条「继续打开」摆着时，说明换成上次那个文件夹的名字：一眼看得出点它会进哪儿
-    hint.textContent = S.sidebarResumeHandle === null
-      ? "尚未选择工作区文件夹。"
-      : "上次的工作区：" + S.sidebarResumeHandle.name;   // 名字是数据，用 textContent 写入，不做任何转义或拼接
+    hint.textContent = "这个浏览器没有提供内部工作区，暂时无法保存文件。";
     S.sidebarTreeDom.appendChild(hint);
-    // 「继续打开」：上一次用过的文件夹还记着，点这一下就是浏览器要求的那个手势，点完就进去
-    // 排在最前面：接着上次继续干活通常是最想点的那一个；样式全部来自 sb-pick，只有与下一条之间的间距另给
-    // 它另带一个 sb-resume 类，点击时靠它把这条与「另选一个文件夹」分开，否则两者外观一样、判不出谁是谁
-    if (S.sidebarResumeHandle !== null) {
-      const resume = document.createElement("button");
-      resume.className = "sb-pick sb-resume";
-      resume.type = "button";
-      resume.textContent = "继续打开";
-      S.sidebarTreeDom.appendChild(resume);
-    }
-    const pick = document.createElement("button");
-    pick.className = "sb-pick";
-    pick.type = "button";
-    pick.textContent = "选择文件夹";
-    S.sidebarTreeDom.appendChild(pick);
-    // 「打开文件」：与「选择文件夹」同一套外观，紧挨在它下面
-    // 两者做的是两件不同的事：上面那个是选一个文件夹当工作区，这一个只打开单独一份存档，不建工作区
-    // 所以它另带一个 sb-open-file 类，点击时靠它把两者分开；样式仍全部来自 sb-pick，不必另写一套
-    const openFile = document.createElement("button");
-    openFile.className = "sb-pick sb-open-file";
-    openFile.type = "button";
-    openFile.textContent = "打开文件";
-    S.sidebarTreeDom.appendChild(openFile);
     return;
   }
   S.sidebarTreeDom.className = "";   // 有工作区了就把空状态的居中布局摘掉，恢复成一行一行的列表
@@ -247,8 +220,10 @@ function setNodeSaving(node, saving) {
 // 主循环每帧都调它，但只在状态真的翻转时才动 DOM，所以平时的代价只是一次布尔比较
 function syncSidebarDirty() {
   if (S.openFileNode === null) return;             // 当前文件不是从列表打开的，没有哪一行可标
-  if (S.openFileNode.dirty === S.docDirty) return;   // 状态没变就不动，不必每帧去翻一遍行元素
-  S.openFileNode.dirty = S.docDirty;
+  // 圆点说的是「还没写回文件夹」：内存里还没存进工作区，或存了但还没刷新到文件夹，都算亮
+  const want = S.docDirty === true || isWorkspaceUnsynced(S.openFileNode.path);
+  if (S.openFileNode.dirty === want) return;   // 状态没变就不动，不必每帧去翻一遍行元素
+  S.openFileNode.dirty = want;
   paintSidebarDot(S.openFileNode);
 }
 
@@ -276,149 +251,39 @@ function hasStashedChanges(nodes) {
   return false;
 }
 
-// 点根目录名：换一个文件夹当工作区
-// 流程是——先弹系统框问你选哪个文件夹，再确认一次读写权限，然后把这一层读出来铺进列表
-// 根目录名同时换成这个文件夹的真实名字；不往磁盘写任何东西，也不记在浏览器里
-// 换文件夹会把手上没保存的东西一起丢掉（当前画面上那份改动，以及各条里暂存的那几份），
-// 所以先问一句「确定要丢弃吗」，点头之前的任何一步都不动现有的列表与画面
-async function onChangeFolder() {
-  // 已经有一个问题在等了就别再开一个：再点一次根目录名会把上一个问题顶掉，
-  // 而上一段流程还在原地等它的答案，永远等不到
-  if (S.confirmOpen) return;
-  // 目录选择能力：Firefox 与 Safari 都没有，先判一下，不支持就只留一句日志，不往下走
-  if (!("showDirectoryPicker" in window)) {
-    console.log("[列表] 当前浏览器不支持直接选文件夹");
-    return;
-  }
-  // 有没保存的东西就先问，再决定要不要弹文件夹选择框
-  // 顺序反过来的话，用户挑完文件夹才被告知要丢东西，那时候他已经白挑了一趟
-  // 只在「换」文件夹时问：还没有工作区时那个按钮是「选择文件夹」，选一个进来不会丢任何东西，
-  // 那种情况下弹这句问话就是虚惊一场
-  if (currentTree !== null && (S.docDirty === true || hasStashedChanges(currentTree))) {
-    const discard = await askConfirm("仍有未保存的更改。确定要丢弃吗？");
-    // 不答应就整个作罢：文件夹选择框不弹，列表与画面上的一切保持原样，没丢任何东西
-    if (!discard) return;
-    // 点头之后到真正读成新文件夹之间还有好几步都可能失败（选择框取消、权限被拒、读取出错），
-    // 所以这里只是「同意丢掉」，真正的丢弃发生在下面新树铺成的那一刻：那之前中途退出都不算数
-  }
-  let handle;
-  try {
-    // 必须在点击这类用户手势里调用，否则浏览器会以安全错误拒绝
-    handle = await window.showDirectoryPicker({ mode: "readwrite" });
-  } catch (err) {
-    // 用户按取消不是错误，静默收场；其它错误才报出来，免得一次取消就刷一条日志
-    if (err.name !== "AbortError") console.log("[列表] 文件夹选择框出错：", err);
-    return;
-  }
-  let perm = "";
-  try {
-    // 拿到句柄不等于一直有权限：先问一次现状，不是已授权就再申请一次，申请会弹浏览器的权限询问
-    perm = await handle.queryPermission({ mode: "readwrite" });
-    if (perm !== "granted") perm = await handle.requestPermission({ mode: "readwrite" });
-  } catch (err) {
-    console.log("[列表] 权限确认出错：", err);
-    return;
-  }
-  // 读与接都交给 adoptWorkspaceFolder：与「继续打开上次的工作区」走同一条路，两边规则只有一份
-  // 读失败时列表仍是原来那棵，不会变成一个空壳，所以这里什么都不做
-  if (await adoptWorkspaceFolder(handle)) console.log("[列表] 文件夹权限：" + perm);
-}
-
-// 把一个目录接成工作区：读出第一层铺进列表，并把句柄记进库，下次打开页面就接着打开它
-// 换工作区（onChangeFolder）与接着打开上次的工作区（resumeWorkspaceNow）两条路都走它，规则只有一份
-// 读不出来（权限被收回、文件夹已被删掉或挪走）返回 false 且不动列表，由调用方决定怎么收场
+// 把一个目录接成工作区：读出第一层铺进列表，并把每个节点补上相对路径
+// 内部工作区（OPFS）与同步后的重读都走它，规则只有一份；读不出来返回 false 且不动列表
 async function adoptWorkspaceFolder(handle) {
   let children;
   try {
-    children = await readDirectoryEntries(handle);   // 只读这一层，子文件夹留着展开时再读
+    children = await readDirectoryEntries(handle, "");   // 只读这一层，子文件夹留着展开时再读
   } catch (err) {
-    console.log("[列表] 读取文件夹 " + handle.name + " 失败：", err);
+    console.log("[列表] 读取工作区失败：", err);
     return false;
   }
   // 句柄一并留在树上：往这一层里新建条目时要靠它，丢了就只能在子文件夹里新建，根目录下建不了
-  currentTree = { name: handle.name, handle: handle, children: children };
-  S.sidebarResumeHandle = null;       // 真的打开了，空状态里那条入口不再需要
-  rememberWorkspaceHandle(handle);  // 记进库：下次打开页面直接接着打开它
+  currentTree = { name: "工作区", handle: handle, children: children, path: "" };
+  S.sidebarResumeHandle = null;
+  refreshTreePaths();
   buildSidebarTree();
-  console.log("[列表] 已载入文件夹 " + handle.name + "，共 " + children.length + " 条");
+  console.log("[列表] 已打开内部工作区，共 " + children.length + " 条");
   return true;
 }
 
-// 启动时试着接着打开上次的工作区：库里那份目录句柄由 main.js 先读回内存，再走这里
-// 能不能不用点就进去由浏览器说了算：权限若跨会话留住了（Chrome 里上次授权选的是「每次访问都允许」，
-// 或者页面是以装好的应用打开的），这一步就直接把列表铺出来；若还差一次授权，就把入口摆进空状态等一次点击
-// 明确被拒绝过就什么都不摆：点了也只会立刻回一个 denied，摆在那里反而像是能用
+// 启动时直接打开内部工作区：OPFS 不需要任何授权，所以不再有「继续打开」那一步，也不必请求文件夹权限
 async function resumeWorkspace() {
-  if (currentTree !== null) return;   // 已经开着工作区（例如别处刚切过一个），不覆盖
-  const handle = lastWorkspaceHandle;
-  if (handle === null) return;        // 没记过工作区，照常走空状态
-  let perm = "prompt";
-  try {
-    // 这里只查不申请：查询不需要用户手势，申请需要，所以拆成两步，启动这一步只做得了查询
-    perm = await handle.queryPermission({ mode: "readwrite" });
-  } catch (err) {
-    console.log("[列表] 查询上次工作区的权限失败：", err);
-    return;
-  }
-  if (perm === "granted") {
-    if (await adoptWorkspaceFolder(handle)) {
-      console.log("[列表] 已接着打开上次的工作区 " + handle.name + "（权限仍然有效）");
-      return;
-    }
-    // 权限还在却读不出来，多半是这个文件夹已经被删掉或挪走了：清掉这条记忆，下次启动不再白试一次
-    forgetWorkspaceHandle();
-    return;
-  }
-  if (perm === "denied") return;   // 用户明确拒绝过：不再摆入口
-  S.sidebarResumeHandle = handle;    // 还差一次点击才算数
-  buildSidebarTree();
-  console.log("[列表] 上次的工作区 " + handle.name + " 还差一次授权，已在竖栏里摆出「继续打开」");
+  if (currentTree !== null) return;   // 已经开着工作区，不覆盖
+  const handle = await getWorkspaceRoot();
+  if (handle === null) { buildSidebarTree(); return; }   // 浏览器不支持 OPFS：列表里摆一条说明
+  if (!(await adoptWorkspaceFolder(handle))) return;
+  // 打开后把当前文件按路径重新绑上，之后保存才找得到对应的行
+  const node = findNodeByPath(openFilePath);
+  if (node !== null && node.isFolder !== true) S.openFileNode = node;
 }
 
-// 点「继续打开」：这一下点击正是浏览器要的那个手势，在这一刻申请权限，允许了就把工作区铺出来
-// 没允许（用户点了不允许、文件夹已被删掉或挪走）都只报一句，空状态里另选一个文件夹那条路照旧
-async function resumeWorkspaceNow() {
-  const handle = S.sidebarResumeHandle;
-  if (handle === null) return;
-  let perm = "prompt";
-  try {
-    perm = await handle.queryPermission({ mode: "readwrite" });
-    if (perm !== "granted") perm = await handle.requestPermission({ mode: "readwrite" });
-  } catch (err) {
-    console.log("[列表] 申请上次工作区的权限失败：", err);
-    return;
-  }
-  if (perm !== "granted") {
-    console.log("[列表] 没有取得 " + handle.name + " 的权限，仍可以在竖栏里另选一个文件夹");
-    return;
-  }
-  if (await adoptWorkspaceFolder(handle)) return;
-  // 权限拿到了却读不出来：这条记忆就此清掉，竖栏回到「另选一个文件夹」那一步
-  forgetWorkspaceHandle();
-  S.sidebarResumeHandle = null;
-  buildSidebarTree();
-}
-
-// 点在列表上：空状态那个按钮与根目录名都是换文件夹，文件夹条目是开合这一层，文件条目只把高亮挪过去
+// 点在列表上：文件夹条目是开合这一层，文件条目只把高亮挪过去
 // 点空白处则取消高亮，回到「没有打开任何一条」；除此之外不打开、不读取文件内容、不保存任何东西
 async function onSidebarTreeClick(e) {
-  // 「继续打开」也要判在「选择文件夹」之前，理由与下一条一样：它共用 sb-pick 那一套外观类，
-  // 先判 sb-pick 会把它当成换文件夹，点下去弹出来的是系统文件夹选择框
-  if (e.target.closest(".sb-resume") !== null) {
-    resumeWorkspaceNow();
-    return;
-  }
-  // 「打开文件」要判在「选择文件夹」之前：两个按钮共用 sb-pick 那一套外观类，
-  // 先判 sb-pick 会把它也当成换文件夹，点下去弹出来的是文件夹选择框
-  if (e.target.closest(".sb-open-file") !== null) {
-    onOpenFile();   // 复用编辑器里那个「打开」：同一个系统文件框、同一套读入与校验，只是入口换到了这里
-    return;
-  }
-  // 空状态那个「选择文件夹」按钮与根目录名是同一件事，先并到一起判
-  if (e.target.closest(".sb-pick") !== null || e.target.closest(".sb-header") !== null) {
-    onChangeFolder();
-    return;
-  }
   // 空白处：命中的是容器本身，说明这一下没落在任何一行上，把高亮撤掉
   // 没有高亮时不必重画，省掉一次整棵重建
   if (e.target === S.sidebarTreeDom) {
@@ -481,12 +346,13 @@ async function onSidebarTreeDblClick(e) {
       S.docDirty = true;   // 摆回来的这一份本来就没保存过：applyScene 会把标记清掉，这里要重新亮上
       S.docEditSeq++;      // 摆回来同样是一次内容更替，序号要往前走，免得保存时误判成「期间没改过」
       S.openFileNode = node;
+      openFilePath = node.path;   // 记住落处，刷新列表之后才找得回这一条
       console.log("[列表] 已切回 " + node.name + "，摆回没保存的那一份改动");
     }
     return;
   }
-  // 没有存下的改动，就按磁盘上的内容打开；成功后记住这一条，之后它被改动要在它前面亮圆点
-  if (await openFromHandle(node.handle)) S.openFileNode = node;
+  // 没有存下的改动，就按工作区里的内容打开；成功后记住这一条，之后它被改动要在它前面亮圆点
+  if (await openFromHandle(node.handle)) { S.openFileNode = node; openFilePath = node.path; }
 }
 
 /* ========== 悬停时的小窗 ========== */
@@ -702,16 +568,20 @@ async function commitSidebarCreate(rawName) {
       setSidebarNewHint("已经有同名的了");
       return;
     }
+    // 新条目在工作区里的相对路径：同步、圆点都按它认文件
+    const parentPath = parent === null ? "" : parent.path;
+    const path = parentPath === "" ? name : parentPath + "/" + name;
     let node;
     if (kind === "folder") {
       // 刚建出来的文件夹必定是空的，所以直接标成已读过，展开时不必再去读一次磁盘
-      node = { name: name, isFolder: true, open: false, loaded: true, children: [], handle: await dirHandle.getDirectoryHandle(name, { create: true }) };
+      node = { name: name, isFolder: true, open: false, loaded: true, children: [], handle: await dirHandle.getDirectoryHandle(name, { create: true }), path: path };
     } else {
       const fileHandle = await dirHandle.getFileHandle(name, { create: true });
       // 只有电路存档要先写一份空存档进去：不写就是一个零字节文件，双击打开只会得到一句「不是本程序的存档」
       // 纯文本留成真正的空文件：一个字节都不写，别的程序打开就是一份干净的空文件
       if (ext === SAVE_EXT) await writeEmptyScene(fileHandle);
-      node = { name: name, isFolder: false, handle: fileHandle, dirty: false, saving: false, scene: null };
+      node = { name: name, isFolder: false, handle: fileHandle, dirty: false, saving: false, scene: null, path: path };
+      markCreated(path, "");   // 新文件只在工作区里，刷新到文件夹时才会写出去
     }
     cancelSidebarCreate();   // 已经建成了，先收掉输入行再刷新列表
     const owner = parent === null ? currentTree : parent;   // 根目录与文件夹都有 children 这一层，写法合成一处
@@ -751,11 +621,6 @@ function setupSidebarTree() {
   S.sidebarTreeDom.addEventListener("dblclick", onSidebarTreeDblClick);
   S.sidebarTreeDom.addEventListener("mouseover", onSidebarTreeOver);
   S.sidebarTreeDom.addEventListener("mouseout", onSidebarTreeOut);
-  // 按下「选择文件夹」时不让按钮拿焦点：键盘是绑在 window 上的，焦点在哪都不影响快捷键，
-  // 这里只是不想让按钮在被点过之后一直留着一个焦点框（与弹窗里那几个按钮同一套做法）
-  S.sidebarTreeDom.addEventListener("mousedown", function (e) {
-    if (e.target.classList.contains("sb-pick")) e.preventDefault();
-  });
   window.addEventListener("keydown", onSidebarKeyDown);   // 悬停某一行时按回车即改名，只在这里绑一次
   setupSidebarMenu();   // 列表自己的右键菜单：两条固定条目建一次，右键时只改位置
   buildSidebarTree();

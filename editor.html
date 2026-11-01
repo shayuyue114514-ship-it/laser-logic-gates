@@ -100,7 +100,9 @@
      宽度与配色由脚本从 CONFIG / COLOR 注入；栏里是存档列表，点最上面的文件夹名可以换一个文件夹
      它的出现让上方那条面板与网格视口都不再横跨整行 -->
 <div id="sidebar">
-  <!-- 存档列表容器：行由脚本按所选文件夹里的真实条目生成，见 js/sidebar.js -->
+  <!-- 工作区按钮条：导入、拉取、写回、另存为四个按钮，绑定与流程见 js/workspace.js -->
+  <div id="workspaceBar"></div>
+  <!-- 存档列表容器：行由脚本按内部工作区里的真实条目生成，见 js/sidebar.js -->
   <div id="sidebarTree"></div>
 </div>
 
@@ -329,6 +331,8 @@
 <!-- 句柄记忆与存档文件的类型声明：编辑器与首页共用，两页写的是同一个库、同一个键，所以必须排在
      sidebar.js 与 files.js 之前——那两处都要用 SAVE_EXT 与那几个句柄函数 -->
 <script src="js/handle-store.js"></script>
+<!-- 工作区存储层：必须在 sidebar.js 之前加载，侧栏启动时要靠它打开 OPFS 工作区 -->
+<script src="js/workspace.js"></script>
 <script src="js/element-types.js"></script>
 <script src="js/state.js"></script>
 <script src="js/icons.js"></script>

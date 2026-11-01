@@ -197,8 +197,12 @@ async function saveTextEditor() {
     await stream.close();
     stream = null;
     teDirty = false;
-    // 写盘成功，列表圆点与电路一样灭掉
-    if (teNode !== null) { teNode.dirty = false; paintSidebarDot(teNode); }
+    // 写进工作区只等于本地存好：还没写回文件夹，圆点继续亮着，与电路那条规矩一致
+    if (teNode !== null) {
+      markUnsynced(teNode.path);
+      teNode.dirty = true;
+      paintSidebarDot(teNode);
+    }
     console.log("[文本] 已写入 " + teName + "（" + text.length + " 字符）");
     showToast("已保存");
   } catch (err) {

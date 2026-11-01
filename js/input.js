@@ -552,7 +552,8 @@ function setupInput() {
   // 提示文字由浏览器统一决定（各家都固定了措辞，页面改不了），这里只能决定弹不弹
   // 保存刚交出去、收尾还没落地的那几秒也算：文件还没换成新的，此刻关掉等于丢掉这一趟
   window.addEventListener("beforeunload", function (e) {
-    if (S.docDirty !== true && pendingCommit === null) return;  // 与磁盘一致且不在收尾，让它走
+    // 只有「还没写进内部工作区」才拦：已经写进工作区的那一份关掉页面也不会丢
+    if (S.docDirty !== true) return;
     e.preventDefault();    // 现代浏览器：拦下默认动作，弹出确认框
     e.returnValue = true;  // 老浏览器只看这个返回值，赋一个真值就表示「要确认」
   });
