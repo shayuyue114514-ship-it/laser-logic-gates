@@ -661,7 +661,7 @@ function initHomeLogStyle() {
   if (homeLogStyleDone) return;
   homeLogStyleDone = true;
   const css =
-    '.popup.modal .doc .log-item { display: flex; align-items: flex-start; margin: 0 0 12px; padding: 0 0 12px; border-bottom: 1px solid rgba(41, 182, 246, 0.35); }' +
+    '.popup.modal .doc .log-item { display: flex; align-items: flex-start; margin: 0 0 12px; padding: 0 0 12px; border-bottom: 1px solid rgba(31, 41, 51, 0.10); }' +
     '.popup.modal .doc .log-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }' +
     // 左侧展开按钮：平时透明，悬停才浮出一层淡白，读法与文件弹窗里的动作项相同
     '.popup.modal .doc .log-toggle { flex: none; box-sizing: border-box; width: 22px; height: 22px; margin-right: 8px; padding: 0; border: none; border-radius: 6px; background: transparent; color: ' + COLOR.tipName + '; cursor: pointer; transition: background-color 0.16s ease-out; display: flex; align-items: center; justify-content: center; }' +

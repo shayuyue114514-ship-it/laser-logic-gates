@@ -404,9 +404,9 @@ function drawLampGlow(vp) {
 // 画视口边框，明确标出可显示区域的边界
 function drawViewportBorder(vp) {
   S.ctx.save();
-  S.ctx.lineWidth = 2;
+  S.ctx.lineWidth = 1;
   S.ctx.strokeStyle = COLOR.border;
-  S.ctx.strokeRect(vp.x + 1, vp.y + 1, vp.w - 2, vp.h - 2);
+  S.ctx.strokeRect(vp.x + 0.5, vp.y + 0.5, vp.w - 1, vp.h - 1);
   S.ctx.restore();
 }
 

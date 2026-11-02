@@ -4,7 +4,7 @@
 /* ========== 常量配置 ========== */
 
 const CONFIG = {
-  appVersion: "1.0.0.012",    // 应用版本号：唯一一处定义，首页副标题、离线缓存与发布包都以它为准；内部号每次改动末位加一
+  appVersion: "1.0.0.013",    // 应用版本号：唯一一处定义，首页副标题、离线缓存与发布包都以它为准；内部号每次改动末位加一
   gridUnit: 1,            // 网格基本单位：1 个世界单位 = 1 格，也是永远显示的最小格子
   gridLineRatio: 0.03,    // 网格线宽 = 格宽 × 这个比例 + gridLineBase，上限 1 CSS px
   gridLineBase: 0.22,     // 上式里的固定加数（CSS px）：线细到 0.25 px 上下就看不见了，靠它兜住，缩到多小也画得出来
@@ -29,14 +29,14 @@ const CONFIG = {
   panelSlotCount: 7,      // 面板里选项槽的数量：一个选中槽、五个元件槽、末尾一个「文本」工具槽
   panelSlotPad: 8,        // 选项槽区域相对面板内沿的内缩（CSS px），让槽不贴到面板边框上
   panelSlotGap: 8,        // 选项槽之间的横向间隔（CSS px）
-  panelSlotRadius: 8,     // 选项槽的圆角半径（CSS px）
+  panelSlotRadius: 6,     // 选项槽的圆角半径（CSS px）
   panelSlotSide: 50,      // 选项槽边长（CSS px）：固定值，不再由面板高度推出，面板加高不会把槽一起撑大
   panelSlotElementLen: 28,      // 槽内元件的长度（CSS px，三角形顶点到底边）：形状比例不变，宽度按 elementWid/elementLen 自动推出
-  panelSlotHoverScale: 0.93,    // 悬停时整个槽缩到的比例：槽与槽内元件一起缩，不会只缩框不缩元件
-  panelSlotPressedScale: 0.86,  // 按下时整个槽缩到的比例：比悬停更深，手感像真的按进去
+  panelSlotHoverScale: 1,    // 悬停不再缩放：工具型界面靠底色变化反馈，避免整排槽抖动
+  panelSlotPressedScale: 1,  // 按下同样不缩放：与悬停一致，反馈只改底色与描边
   panelSlotAnimDuration: 0.16,  // 槽反馈动画时长（秒）：悬停与按下的缩放都用它，走固定时长的缓出曲线，不用指数平滑
   panelSlotKeyPressDuration: 0.2, // 键盘选中时按下态保持的秒数：比动画时长略长，缩到底之后再回弹，与点一下鼠标看到的节奏一样
-  slotSelectedBorderWidth: 3,   // 选中槽的描边宽度（CSS px）：比普通槽的 2px 略粗，作为选中标识
+  slotSelectedBorderWidth: 1.5,   // 选中槽的描边宽度（CSS px）：比普通槽的 1px 略粗，作为选中标识
   settingsLitAmount: 0.45,      // 设置按钮打开时的提亮幅度（0~1）：朝白色混这么多，太大就发灰不像同一色系
   settingsLitDuration: 0.22,    // 设置按钮提亮的过渡时长（秒）：亮起与熄灭都走它，太快会像闪一下
   gearTeeth: 8,           // 齿轮齿数：8 齿在二十几像素的尺寸下疏密刚好，再多就糊成一圈看不出齿
@@ -278,15 +278,15 @@ const HANDOFF_MARK = "#open";  // string：地址里的标记
 
 /* 配色：网格蓝色系，背景淡蓝 */
 const COLOR = {
-  line: "#42A5F5",        // 网格线：全部同色同粗细，没有加粗线
-  background: "#81D4FA",  // 视口内背景：淡蓝
-  border: "#29B6F6",      // 视口边框：Light Blue 400
-  panelFill: "#7AD5FF",   // 上方面板底板：硬编码定死，等价于 hsl(199, 100%, 74%)，不随调试面板变化
-  slotFill: "#94DBFF",    // 选项槽填充：硬编码定死，等价于 hsl(200, 100%, 79%)，不随调试面板变化
-  slotFillSelected: "#C4EBFF", // 选中槽填充：比 slotFill 朝白色提亮约 45%，和未选中槽一眼能分开
-  slotBorder: "#29B6F6",  // 选项槽描边：与视口边框同色，整页外框保持一个色系
-  slotBorderSelected: "#5FC8F8", // 选中槽描边：比 slotBorder 朝白色提亮约 25%，只亮一点点，和加粗一起构成选中标识
-  rightToolFill: "#8AD8FF", // 右侧工具栏方框的填充：与元件槽同色系，略深一档，压在更深的栏底上仍看得出格子
+  line: "#DCE5EE",        // 网格线：淡灰蓝，退到背景层，不与元件抢视线
+  background: "#E8F1F8",  // 视口内背景：近白的冷蓝，只留一点色相
+  border: "#D7E0E9",      // 视口边框：淡灰蓝细线，只用来交代边界
+  panelFill: "#F7F9FB",   // 上方面板底板：近白冷灰，界面不再用彩色大底
+  slotFill: "#FFFFFF",    // 选项槽填充：白底，元件图标自己承担颜色
+  slotFillSelected: "#E3F2FD", // 选中槽填充：只保留一层很浅的蓝，与白底分得开又不刺眼
+  slotBorder: "#DDE5EC",  // 选项槽描边：淡灰，常态不抢眼
+  slotBorderSelected: "#1E88E5", // 选中槽描边：唯一的强调蓝，选中状态一眼可辨
+  rightToolFill: "#FFFFFF", // 右侧工具栏方框的填充：白底，与竖栏的浅灰底分出格子
   iconClearBeam: "#6BC5FA",  // 清除图标里激光束的外层蓝：取自图标原文件
   iconClearBeamInner: "#4BBBFB", // 激光束里叠的那条稍深的蓝：两层叠出光束的中芯
   iconClearSlash: "#F04242", // 划过光束的红色斜杠：全图标唯一的暖色，一眼看出是「清除」
@@ -297,12 +297,12 @@ const COLOR = {
   runIcon: "#1E9E52",     // 状态槽「运行中」的绿色：朝右三角形，在淡蓝底上够深也够亮
   pauseIcon: "#E04A4F",   // 状态槽「已暂停」的红色：两条竖杠，与绿色形成一眼可辨的对照
   stepIcon: "#1E9E52",    // 「前进一步」的绿色：与运行中的三角同色，两者是同一组步进控制
-  tipFill: "#C4EBFF",     // 简介底板填充：淡蓝，比面板底色浅一档，浮在网格上也读得清
-  tipBorder: "#29B6F6",   // 简介底板描边：与面板、视口边框同色，整页仍是同一套外框
-  tipName: "#0D47A1",     // 简介里元件名称的文字色：深蓝，层级最高
-  tipDesc: "#2C4A63",     // 简介里说明文字的颜色：略浅的深灰蓝，不抢名称
-  laserCore: "#F5FBFF",   // 激光光芯：淡白略偏冷，比浅蓝底亮，压在上面读得出来
-  laserGlow: "#FFFFFF",   // 激光辉光：纯白，透明度由每层的 globalAlpha 单独给，所以这里只要颜色
+  tipFill: "#FFFFFF",     // 简介底板填充：白底，靠细边与阴影浮起来
+  tipBorder: "#DDE5EC",   // 简介底板描边：与元件槽同一条淡灰细线
+  tipName: "#1F2933",     // 简介里元件名称的文字色：中性近黑，不再整页深蓝
+  tipDesc: "#5B6B7B",     // 简介里说明文字的颜色：中性次要灰，比名称低一档
+  laserCore: "#1565C0",   // 激光光芯：深蓝，在近白背景上依然清楚，也不再靠白色发光
+  laserGlow: "#64B5F6",   // 激光辉光：中蓝，透明度仍按层递减，在近白底上形成柔和的蓝晕
   lampGlow: "#FF8A80",    // 灯被照亮时的光晕：淡红，透明度由亮起进度与峰值一起给
   selectBorder: "#1565C0", // 拉框描边：深蓝，压在淡蓝网格上边界清晰
   selectFill: "rgba(21, 101, 192, 0.14)", // 拉框的填充：同色低透明度，压得住网格又不遮住框里的元件
@@ -317,7 +317,7 @@ const COLOR = {
   // 闪两下时朝浅橙走：只在橘黄族内提亮，不会和蓝色底色混成一锅灰
   searchLitFlashFill: { h: 34, s: 94, l: 72 },    // 闪光峰值时的填充：只比常态亮一小截，不照成白
   searchLitFlashStroke: { h: 27, s: 86, l: 45 },  // 闪光峰值时的描边：跟着提亮但仍比填充深
-  hintText: "#0D47A1",    // 底栏提示文字：深蓝，压在淡蓝底板上读得清，且与整页仍是同一色系
+  hintText: "#5B6B7B",    // 底栏提示文字：中性次要灰，不参与强调
   // 画布上标签与文本块的字色：近黑但不是纯黑（纯黑压在浅蓝上会显得生硬、也容易被读成没调过的默认值）
   // 往蓝偏一点点（约 hsl(214, 26%, 14%)），与整页的蓝色系同源，压在最浅那档蓝底上仍然很清楚
   labelText: "#1A222C"
@@ -368,8 +368,8 @@ const RGB = {
 const settingsHSL = {
   gearFill: { h: 207, s: 89, l: 55 },    // 齿轮填充：初值同元件填充
   gearStroke: { h: 210, s: 80, l: 42 },  // 齿轮描边：初值同元件描边
-  slotFill: { h: 200, s: 100, l: 79 },   // 设置槽底板填充：初值同元件槽填充
-  slotStroke: { h: 199, s: 92, l: 56 }   // 设置槽底板描边：初值同元件槽描边
+  slotFill: { h: 207, s: 70, l: 90 },   // 按钮点亮底板：很浅的蓝，与白底按钮分得开
+  slotStroke: { h: 207, s: 78, l: 53 }   // 按钮点亮描边：强调蓝，点亮时一眼可见
 };
 
 // 元件选择面板各槽放的类型：下标即类型下标，第一个元件槽放的就是第 0 个类型

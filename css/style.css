@@ -43,7 +43,8 @@ html, body {
   position: fixed;
   box-sizing: border-box;
   z-index: 2;
-  border: 2px solid;
+  border: 1px solid;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
   display: flex;              /* 纵向两段：顶部按钮条固定，列表占满剩下的高度 */
   flex-direction: column;
 }
@@ -53,7 +54,8 @@ html, body {
   position: fixed;
   box-sizing: border-box;
   z-index: 2;
-  border: 2px solid;
+  border: 1px solid;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;      /* 这么窄的栏里，滚动条会占掉一半宽度，隐藏它，靠滚轮滚动 */
@@ -81,7 +83,7 @@ html, body {
   justify-content: center;
   width: 100%;
   aspect-ratio: 1 / 1;   /* 正方形：栏有多宽，格子就有多高 */
-  border: 2px solid var(--rb-border);
+  border: 1px solid var(--rb-border);
   border-radius: 6px;
   background: var(--rb-fill);
   cursor: pointer;
@@ -98,9 +100,11 @@ html, body {
   position: fixed;
   z-index: 5;               /* 与其它悬停小窗同一档：压在栏与各面板之上，仍在弹窗之下 */
   padding: 4px 8px;
+  border: 1px solid #DDE5EC;
   border-radius: 6px;
-  background: #C4EBFF;
-  color: #0D47A1;
+  background: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.10);
+  color: #1F2933;
   font-size: 12px;
   line-height: 17px;
   white-space: nowrap;      /* 名称都很短，一律单行，不折行也不撑宽 */
@@ -118,7 +122,7 @@ html, body {
   box-sizing: border-box;
   max-width: 60vw;
   padding: 8px 18px;
-  border: 2px solid;
+  border: 1px solid;
   border-radius: 8px;
   opacity: 0;
   transform: translate(-50%, -50%);   /* 定位点取框的中心：脚本只需给出视口中线的坐标 */
@@ -151,14 +155,12 @@ html, body {
 }
 /* 悬停与按下：与元件槽取同一档（0.93 / 0.86），只缩放不变色，按下不闪 */
 .rb-tool:hover {
-  transform: scale(0.93);
+  background: #F2F6FA;
+  border-color: #D7E0E9;
 }
-.rb-tool:active {
-  transform: scale(0.86);
-}
-/* 键盘触发时的反馈：只缩到悬停那一档，比按住更轻，松开后的回弹走上面那条 0.16 秒过渡 */
+.rb-tool:active,
 .rb-tool.press {
-  transform: scale(0.93);
+  background: #E8F1F8;
 }
 /* 选中：颜色变化沿用元件槽那一套（填充与描边一起提亮），缩放不变 */
 .rb-tool.on {
@@ -184,7 +186,7 @@ html, body {
 .sb-empty-title {
   display: flex;
   align-items: center;
-  color: #0D47A1;
+  color: #1F2933;
   font-weight: 700;
 }
 /* 空状态里的说明：比标题轻一档，行高放开一点，读起来是一句话而不是又一个标题 */
@@ -200,18 +202,18 @@ html, body {
   display: block;
   width: 100%;
   padding: 7px 0;
-  border: none;
+  border: 1px solid #DDE5EC;
   border-radius: 6px;
-  background: #C4EBFF;
-  color: #0D47A1;
+  background: #FFFFFF;
+  color: #1F2933;
   font-family: inherit;
   font-size: 13px;
   text-align: center;
   cursor: pointer;
   transition: background-color 0.16s ease-out;
 }
-.sb-pick:hover { background: #D8F3FF; }   /* 悬停略亮一档：与列表里那种淡白高亮区分开，它是按钮不是行 */
-.sb-pick:active { background: #ADDCF5; }  /* 按下压深一档，手感像真的按进去 */
+.sb-pick:hover { background: #F2F6FA; }   /* 悬停只换底色，不再缩放或提亮成另一种蓝 */
+.sb-pick:active { background: #E8F1F8; }  /* 按下压深一档 */
 /* 「打开文件」按钮：外观全部沿用上面那一条，只多出与它之间的间距 */
 /* 两者不是同一条流程的先后两步，而是并列的两件事，所以中间空出一行的距离，不贴着排 */
 .sb-open-file {
@@ -233,9 +235,11 @@ html, body {
   z-index: 5;               /* 与简介浮层同一档：压在竖栏与各面板之上，仍在弹窗之下 */
   max-width: 260px;
   padding: 4px 8px;
+  border: 1px solid #DDE5EC;
   border-radius: 6px;
-  background: #C4EBFF;
-  color: #0D47A1;
+  background: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.10);
+  color: #1F2933;
   font-size: 12px;
   line-height: 17px;
   word-break: break-all;    /* 名字很长时按字符折行，不会拉出一条极宽的小窗 */
@@ -286,7 +290,7 @@ html, body {
 .sb-menu-item:hover,
 .sb-menu-item:focus-visible {
   background: #D8F3FF;
-  color: #0D47A1;
+  color: #1F2933;
   outline: none;
 }
 /* 按下压深一档：与竖栏里那两个按钮、弹窗里那几个按钮是同一套手感 */
@@ -318,7 +322,7 @@ html, body {
   border: 1px solid #1565C0;
   border-radius: 4px;
   background: #FFFFFF;
-  color: #0D47A1;
+  color: #1F2933;
   font-family: inherit;
   font-size: 13px;
   outline: none;
@@ -348,7 +352,7 @@ html, body {
   padding: 2px 10px 8px;
   margin-bottom: 6px;
   font-weight: 700;
-  color: #0D47A1;
+  color: #1F2933;
   border-bottom: 1px solid rgba(13, 71, 161, 0.16);
 }
 .sb-header:hover { background: transparent; }
@@ -361,10 +365,10 @@ html, body {
   white-space: nowrap;
   color: #123B54;
 }
-.sb-row:hover { background: rgba(255, 255, 255, 0.45); }
+.sb-row:hover { background: #F4F7FA; }
 .sb-row.is-folder { cursor: pointer; }
 /* 当前打开的那一条：本项目里白色代表选中，所以仍是一层白底，只是浓度压下来，比悬停明显一档又不过分扎眼 */
-.sb-row.is-selected { background: rgba(255, 255, 255, 0.62); color: #0D47A1; }
+.sb-row.is-selected { background: #EAF1F8; color: #1F2933; }
 /* 缩进导引条：一级一根，竖线拉满整行高，位置正对上一级箭头的中线 */
 .sb-guide {
   position: relative;
@@ -401,7 +405,7 @@ html, body {
   height: 16px;
   margin: 0 6px 0 2px;
 }
-.sb-icon.folder { color: #1B6C8F; }
+.sb-icon.folder { color: #5B6B7B; }
 .sb-icon.file { color: #4E86A8; }
 /* 名称：占满剩余宽度，太长的名字从右边省略，绝不把整行撑破 */
 .sb-label {
@@ -466,7 +470,7 @@ html, body {
   left: 0;
   top: 0;
   box-sizing: border-box;
-  border: 2px solid;
+  border: 1px solid;
   opacity: 0;
   pointer-events: none;
   z-index: 5;
@@ -483,7 +487,8 @@ html, body {
   box-sizing: border-box;
   z-index: 3;
   background: var(--panel-fill);
-  border: 2px solid var(--border-color);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);   /* 极轻投影：把面板从画布上托起一层，不靠彩色底板 */
   user-select: none;
   -webkit-user-select: none;
 }
@@ -519,7 +524,7 @@ html, body {
   height: var(--slot-side);
   padding: 0;
   background: var(--slot-fill);
-  border: 2px solid var(--slot-border);
+  border: 1px solid var(--slot-border);
   border-radius: var(--slot-radius);
   transition:
     transform var(--slot-anim) cubic-bezier(0.22, 1, 0.36, 1),
@@ -534,11 +539,12 @@ html, body {
 #panelSlots > .pslot.kb,
 #panelButtons > .pslot:hover,
 #panelButtons > .pslot.kb {
-  transform: scale(var(--slot-hover));
+  background: #F2F6FA;
+  border-color: #D7E0E9;
 }
 #panelSlots > .pslot:active,
 #panelButtons > .pslot:active {
-  transform: scale(var(--slot-press));
+  background: #E8F1F8;
 }
 /* 选中的槽：底色与描边同时提亮、描边加粗；没有额外的框或光圈 */
 #panelSlots > .pslot.selected {
@@ -592,7 +598,8 @@ html, body {
   top: 0;
   box-sizing: border-box;
   display: none;
-  border: 2px solid;
+  border: 1px solid;
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.12);   /* 弹窗靠阴影与背景分层，不再用蓝色底板 */
   opacity: 0;
   pointer-events: auto;
   z-index: 4;
@@ -625,7 +632,7 @@ html, body {
   transition: transform 0.16s ease-out;
 }
 .popup .sw.on {
-  background: #29B6F6;        /* 开启态滑轨：与视口边框同色，整页仍是同一色系 */
+  background: #4A90C2;        /* 开启态滑轨：保留一点蓝，作为唯一的开关状态色 */
 }
 .popup .sw.on .knob {
   transform: translateX(16px);  /* 滑轨宽 34 减滑块 14 再减左右各 2 的留边 */
@@ -639,8 +646,8 @@ html, body {
 .popup .sec {
   margin-top: 6px;
   padding-top: 4px;
-  border-top: 1px solid rgba(41, 182, 246, 0.5);
-  color: #0D47A1;
+  border-top: 1px solid rgba(31, 41, 51, 0.10);
+  color: #1F2933;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -650,7 +657,7 @@ html, body {
 .popup input[type="range"] {
   flex: none;
   width: 92px;
-  accent-color: #29B6F6;
+  accent-color: #C9D8E6;
 }
 /* 速度数值：做成小徽章，白底圆角、数字等宽居中，读数清楚又不像裸露的文本 */
 .popup .val {
@@ -662,7 +669,7 @@ html, body {
   text-align: center;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.72);
-  color: #1B6C8F;                /* 深一档的蓝：白底上比正文灰更清楚 */
+  color: #5B6B7B;                /* 深一档的蓝：白底上比正文灰更清楚 */
   font-variant-numeric: tabular-nums;  /* 等宽数字：拖动时数字跳动不会左右晃 */
 }
 /* 文件弹窗里的动作项：一行一个，整行都是可点区域 */
@@ -676,7 +683,7 @@ html, body {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #1B6C8F;             /* 深一档的蓝：与文件名同色，读起来是「可以点的」，又不必加底板 */
+  color: #5B6B7B;             /* 深一档的蓝：与文件名同色，读起来是「可以点的」，又不必加底板 */
   font-family: inherit;
   font-size: inherit;
   text-align: left;
@@ -755,12 +762,13 @@ html, body {
 /* 右边那个确认键：浅蓝底配深蓝字，与侧栏里的「选择文件夹」同一个读法，一眼能认出是主行动 */
 /* 本项目里白色代表选中，所以这里用蓝底而不是白底，免得被读成「当前选中的一项」 */
 .popup .btn.primary {
-  background: #C4EBFF;
-  color: #0D47A1;
+  background: #1E88E5;
+  border-color: #1E88E5;
+  color: #FFFFFF;
   font-weight: 700;
 }
-.popup .btn.primary:hover { background: #D8F3FF; }
-.popup .btn.primary:active { background: #ADDCF5; }
+.popup .btn.primary:hover { background: #1976D2; border-color: #1976D2; }
+.popup .btn.primary:active { background: #1565C0; border-color: #1565C0; }
 /* 标签输入框：与确认弹窗同一套底板与按钮排布，只是中间换成一行可以打字的输入框 */
 /* 它排在确认弹窗之上：确认弹窗是流程自问自答，而这个是用户双击直接叫起来的，叫起来就该在最前面 */
 .popup.modal.labeledit {
@@ -781,7 +789,7 @@ html, body {
   width: 100%;
   height: 28px;
   padding: 0 8px;
-  border: 1px solid #29B6F6;
+  border: 1px solid #C9D8E6;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.72);
   font-family: inherit;
@@ -881,7 +889,7 @@ html, body {
 #debugPanel .perfRow .val {
   min-width: 44px;
   font-variant-numeric: tabular-nums;
-  color: #0D47A1;
+  color: #1F2933;
 }
 /* 读数区与下面的取色滑块之间画一条分隔线，一眼能看出上面那块是只读的监测区 */
 #debugPanel .perfRow {
@@ -905,7 +913,7 @@ html, body {
   padding-bottom: 7px;
   margin-bottom: 8px;
   border-bottom: 1px solid rgba(41, 182, 246, 0.45);
-  color: #0D47A1;
+  color: #1F2933;
   font-size: 15px;
   font-weight: 700;
   text-align: center;
@@ -924,10 +932,10 @@ html, body {
   width: 46px;
   height: 22px;
   padding: 0 4px;
-  border: 1px solid #29B6F6;
+  border: 1px solid #C9D8E6;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.72);
-  color: #1B6C8F;
+  color: #5B6B7B;
   font-family: inherit;
   font-size: inherit;
   text-align: center;
@@ -954,10 +962,10 @@ html, body {
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid #29B6F6;
+  border: 1px solid #C9D8E6;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.55);
-  color: #0D47A1;
+  color: #1F2933;
   font-family: inherit;
   font-size: 13px;
   line-height: 1;
@@ -985,7 +993,7 @@ html, body {
   display: none;
   position: fixed;
   box-sizing: border-box;
-  border: 2px solid;
+  border: 1px solid;
   opacity: 0;
   pointer-events: auto;
   z-index: 4;               /* 与其它弹窗同一档：压在画布与右侧工具栏之上 */
@@ -1002,10 +1010,10 @@ html, body {
 #searchPanel .smode {
   flex: none;
   padding: 3px 10px;
-  border: 1px solid #29B6F6;
-  border-radius: 10px;
+  border: 1px solid #C9D8E6;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.55);
-  color: #0D47A1;
+  color: #1F2933;
   font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
@@ -1022,7 +1030,7 @@ html, body {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid #29B6F6;
+  border: 1px solid #C9D8E6;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.55);
   cursor: pointer;
@@ -1043,7 +1051,7 @@ html, body {
 }
 /* 页码行：左边「1/12」，右边两个箭头 */
 #searchPanel .spage {
-  color: #0D47A1;
+  color: #1F2933;
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
@@ -1056,10 +1064,10 @@ html, body {
   width: 24px;
   height: 22px;
   padding: 0;
-  border: 1px solid #29B6F6;
+  border: 1px solid #C9D8E6;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.55);
-  color: #0D47A1;
+  color: #1F2933;
   font-family: inherit;
   font-size: 14px;
   line-height: 1;
@@ -1077,9 +1085,11 @@ html, body {
   position: fixed;
   z-index: 5;
   padding: 4px 8px;
+  border: 1px solid #DDE5EC;
   border-radius: 6px;
-  background: #C4EBFF;
-  color: #0D47A1;
+  background: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.10);
+  color: #1F2933;
   font-size: 12px;
   line-height: 17px;
   white-space: nowrap;
@@ -1094,9 +1104,9 @@ html, body {
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
-  border: 2px solid #29B6F6;
-  background: #9EDCFB;         /* 取网格底色再浅一档，空白与电路的底色是同一套色系 */
-  color: #1B6C8F;
+  border: 1px solid #C9D8E6;
+  background: #E8F1F8;         /* 取网格底色再浅一档，空白与电路的底色是同一套色系 */
+  color: #5B6B7B;
   font-size: 13px;
   user-select: none;
 }
@@ -1106,8 +1116,8 @@ html, body {
   position: fixed;
   z-index: 3;                 /* 压在画布之上，但仍低于顶部面板与各种弹窗 */
   box-sizing: border-box;
-  border: 2px solid #29B6F6;
-  background: #9EDCFB;         /* 编辑器底色与空白状态一致，切换时整块网格区颜色不跳 */
+  border: 1px solid #C9D8E6;
+  background: #E8F1F8;         /* 编辑器底色与空白状态一致，切换时整块网格区颜色不跳 */
   overflow: hidden;
 }
 #textEditor .te-card {
@@ -1116,7 +1126,7 @@ html, body {
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  background: #9EDCFB;
+  background: #FFFFFF;
   overflow: hidden;
 }
 #textEditor .te-head {
@@ -1127,7 +1137,7 @@ html, body {
   height: 54px;              /* 正好填满原顶部面板那条带子，正文区上沿与网格顶边对齐 */
   padding: 0 10px 0 14px;
   box-sizing: border-box;
-  background: #C4EBFF;
+  background: #F7F9FB;
 }
 #textEditor .te-name {
   flex: 1;
@@ -1137,12 +1147,12 @@ html, body {
   white-space: nowrap;
   font-size: 15px;
   font-weight: 700;
-  color: #0D47A1;
+  color: #1F2933;
 }
 #textEditor .te-state {
   flex: none;
   font-size: 12px;
-  color: #1B6C8F;
+  color: #5B6B7B;
   opacity: 0.85;
 }
 /* 标题栏两个按钮：与项目其它按钮同一套配色、圆角与按下反馈 */
@@ -1154,17 +1164,17 @@ html, body {
   box-sizing: border-box;
   height: 30px;
   padding: 0 12px;
-  border: 1px solid #29B6F6;
+  border: 1px solid #C9D8E6;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.50);
-  color: #0D47A1;
+  color: #1F2933;
   font-family: inherit;
   font-size: 13px;
   cursor: pointer;
   transition: background-color 0.16s ease-out;
 }
-#textEditor .te-head .btn:hover { background: rgba(255, 255, 255, 0.75); }
-#textEditor .te-head .btn:active { background: rgba(255, 255, 255, 1); }
+#textEditor .te-head .btn:hover { background: #F2F6FA; }
+#textEditor .te-head .btn:active { background: #E8F1F8; }
 /* 正文区：白底等宽字体，占满网格剩余的上下空间，只允许上下滚动 */
 #textEditor textarea {
   flex: 1;
@@ -1176,8 +1186,8 @@ html, body {
   border: none;
   outline: none;
   resize: none;
-  background: #9EDCFB;         /* 正文区也用这档浅蓝 */
-  color: #0D47A1;
+  background: #E8F1F8;         /* 正文区也用这档浅蓝 */
+  color: #1F2933;
   font-family: "SFMono-Regular", Menlo, Consolas, "PingFang SC", monospace;
   font-size: 14px;
   line-height: 1.7;
@@ -1207,7 +1217,7 @@ html, body {
   background: rgba(255, 255, 255, 0.6);
   border: 1px solid rgba(13, 71, 161, 0.28);
   border-radius: 6px;
-  color: #0D47A1;
+  color: #1F2933;
   font-family: inherit;
   font-size: 12px;
   line-height: 1.2;
@@ -1237,18 +1247,18 @@ html, body {
   max-width: calc(100vw - 32px);
   padding: 16px;
   background: #EAF8FF;
-  border: 2px solid #42A5F5;
+  border: 1px solid #D7E0E9;
   border-radius: 8px;
   box-shadow: 0 6px 22px rgba(13, 71, 161, 0.22);
 }
-.sync-title { color: #0D47A1; font-size: 15px; font-weight: 700; }
+.sync-title { color: #1F2933; font-size: 15px; font-weight: 700; }
 .sync-sub { margin-top: 6px; color: #2C4A63; font-size: 12px; line-height: 1.5; }
 /* 清单最多八行左右，再多就在框里滚动 */
 .sync-list { margin-top: 10px; max-height: 220px; overflow-y: auto; }
-.sync-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; color: #0D47A1; font-size: 12px; }
+.sync-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; color: #1F2933; font-size: 12px; }
 .sync-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sync-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .sync-btn { padding: 6px 12px; font-size: 12px; border: 1px solid; border-radius: 6px; cursor: pointer; font-family: inherit; }
-.sync-btn.is-cancel { background: #FFFFFF; color: #0D47A1; border-color: #90CAF9; }
+.sync-btn.is-cancel { background: #FFFFFF; color: #1F2933; border-color: #90CAF9; }
 .sync-btn.is-delete { background: #FFEBEE; color: #C62828; border-color: #EF9A9A; }
 .sync-btn.is-delete-all { background: #C62828; color: #FFFFFF; border-color: #8E0000; font-weight: 700; }
