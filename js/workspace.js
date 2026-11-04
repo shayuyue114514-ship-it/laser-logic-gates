@@ -70,8 +70,10 @@ async function persistBindings() {
 /* ========== 未同步标记 ========== */
 
 // 把一个路径记成「改过、还没写回文件夹」：同一路径只留一份
+// 没绑定外部文件夹时不存在「写回」这件事，保存到工作区本身就是完成，不该把圆点亮成未保存
 function markUnsynced(path) {
   if (path === "") return;
+  if (boundFolder === null) return;
   if (unsyncedPaths.indexOf(path) < 0) { unsyncedPaths.push(path); persistMarks(); }
 }
 
