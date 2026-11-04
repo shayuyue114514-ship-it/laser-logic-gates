@@ -39,7 +39,22 @@ function frame(ts) {
 
 // 初始化：拿上下文 → 调尺寸 → 竖栏的外观与列表 → 复位视图 → 建元件层 → 注入简介浮层外观 → 绑事件 → 启动主循环
 function init() {
-  // 第一句就摆好遮挡层：它必须从第一帧起就在，晚了就盖不住「画布还空着、竖栏还没摆好」的那一瞬
+  // 第一句先自检关键依赖：缺一个就在控制台点名，页面只留一句「文件错误」，
+  // 避免后续一连串「未定义」把真正缺失的那个文件盖住
+  const depsOk = checkStartupDeps([
+    { name: "CONFIG", file: "js/config.js", present: () => typeof CONFIG !== "undefined" },
+    { name: "COLOR", file: "js/config.js", present: () => typeof COLOR !== "undefined" },
+    { name: "state", file: "js/state.js", present: () => typeof state !== "undefined" },
+    { name: "getWorkspaceRoot", file: "js/workspace.js", present: () => typeof getWorkspaceRoot === "function" },
+    { name: "setupSidebarTree", file: "js/sidebar.js", present: () => typeof setupSidebarTree === "function" },
+    { name: "initPanelDom", file: "js/render-panel.js", present: () => typeof initPanelDom === "function" },
+    { name: "initElementLayer", file: "js/ghost.js", present: () => typeof initElementLayer === "function" },
+    { name: "stepSimulation", file: "js/circuit.js", present: () => typeof stepSimulation === "function" },
+    { name: "render", file: "js/camera.js", present: () => typeof render === "function" },
+    { name: "setupInput", file: "js/input.js", present: () => typeof setupInput === "function" }
+  ]);
+  if (!depsOk) { document.body.textContent = "文件错误"; return; }
+  // 自检通过后才摆遮挡层：它必须从第一帧起就在，晚了就盖不住「画布还空着、竖栏还没摆好」的那一瞬
   initBootScreen();
   S.canvas = document.getElementById("gridCanvas");
   S.ctx = S.canvas.getContext("2d");

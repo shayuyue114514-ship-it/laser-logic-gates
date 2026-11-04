@@ -325,7 +325,8 @@
   </div>
 </div>
 <!-- 加载顺序不可随意调整：util.js 必须排在最前面，因为 config.js 在文件顶层就要用 hslToRgb 算配色端点，
-       state.js 在文件顶层要调用缓动函数，两者都要用到工具函数；把工具函数提到最前，这两处才都不会落空 -->
+       state.js 在文件顶层要调用缓动函数，两者都要用到工具函数；把工具函数提到最前，这两处才都不会落空
+       下面按职责分成八组，组内顺序同样有约束；移动任何一行之前先看它所属组的说明 --------------------- -->
 <script src="js/util.js"></script>
 <script src="js/config.js"></script>
 <!-- 句柄记忆与存档文件的类型声明：编辑器与首页共用，两页写的是同一个库、同一个键，所以必须排在
@@ -333,12 +334,14 @@
 <script src="js/handle-store.js"></script>
 <!-- 工作区存储层：必须在 sidebar.js 之前加载，侧栏启动时要靠它打开 OPFS 工作区 -->
 <script src="js/workspace.js"></script>
+<!-- 数据与绘图基础：元件类型表、全局状态容器、图标底图与三块渲染入口 -->
 <script src="js/element-types.js"></script>
 <script src="js/state.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/render-scene.js"></script>
 <script src="js/render-panel.js"></script>
 <script src="js/scene.js"></script>
+<!-- 界面：教程正文、面板与各弹层、侧栏与右键菜单；都建立在上一组的渲染入口之上 -->
 <script src="js/tutorial-content.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/sidebar.js"></script>
@@ -348,6 +351,7 @@
 <script src="js/files.js"></script>
 <!-- 文本编辑器：双击 .txt / .md 时打开，保存走 files.js 里的权限确认 -->
 <script src="js/text-editor.js"></script>
+<!-- 设置、选项槽与元件：从放置、编辑到电路结算的一条链，彼此按调用关系排列 -->
 <script src="js/settings.js"></script>
 <script src="js/slots.js"></script>
 <script src="js/elements.js"></script>
@@ -362,7 +366,7 @@
 <script src="js/debug.js"></script>
 <script src="js/camera.js"></script>
 <script src="js/input.js"></script>
-<!-- 离线缓存登记：页面打开时静默把整站存进本地，之后断网也能直接打开，不依赖任何其它脚本 -->
+<!-- 启动收尾：离线登记独立，加载界面与字体要排在 main.js 之前 -->
 <script src="js/offline.js"></script>
 <!-- 加载界面与字体加载：两个都要排在 main.js 之前，main.js 起步时第一个要用、紧接着第二个也要用
      boot.js 管遮挡层何时收掉，fonts.js 把自带的 MiSans 点名取回来 ------------------------------- -->
