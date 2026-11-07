@@ -204,6 +204,8 @@ function applyOps(ops, reverse) {
     }
   }
   S.rayGraph.dirty = true;  // 元件增删或字段变了，谁挡谁与激光场都得重算
+  // 元件是画在缓存位图上的：撤销/重做改了场景却没作废缓存时，画面上仍是撤销前那一份，看起来像没反应
+  invalidateElementCache();
   S.sceneDirty = true;
   S.docDirty = true;  // 撤销与重做同样在改画面：改完就与磁盘上那份不一样了，未保存的标记照旧要亮
   S.docEditSeq++;     // 撤销与重做也算一次改动，序号照加：它们同样改变了画面内容
