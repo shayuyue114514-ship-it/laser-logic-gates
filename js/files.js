@@ -147,7 +147,7 @@ async function onSaveFileAs() {
     await runSave();
     await reloadWorkspaceTree();
     const node = S.openFileNode;
-    if (node !== null) { node.dirty = isWorkspaceUnsynced(node.path); paintSidebarDot(node); }
+    if (node !== null) { node.dirty = false; paintSidebarDot(node); }
     console.log("[文件] 已另存为工作区里的 " + name);
   } catch (err) {
     console.log("[文件] 另存为失败：", err);
@@ -239,18 +239,12 @@ async function writeCurrentFile() {
     // 走到这里整份内容已经写进内部工作区：呼吸立刻停，内存里那份未保存的标记也灭
     if (S.openFileNode === node && S.docEditSeq === editsAtWrite) S.docDirty = false;
     setNodeSaving(node, false);
-    // 工作区只等于「本地存好」，还没写回用户的文件夹：只有绑定了文件夹才记一笔待同步、让圆点继续亮着提醒
-    // 没绑定时没有「写回」这一步，保存已经完成，圆点必须灭，否则看起来像没存上
+    // 内容已经写进工作区，这一次保存就算完成，圆点必须灭
+    // 「要不要写回外部文件夹」是另一件事，由四个文件按钮处理，不该挂在未保存圆点上
     const savedPath = node === null ? openFilePath : node.path;
     if (savedPath !== "") {
-      if (boundFolder !== null) {
-        markUnsynced(savedPath);
-        if (node !== null) { node.dirty = true; paintSidebarDot(node); }
-      } else if (node !== null) {
-        clearUnsynced(savedPath);   // 顺手把以前残留的待同步记录清掉，否则圆点会被旧记录一直点亮
-        node.dirty = false;
-        paintSidebarDot(node);
-      }
+      if (boundFolder !== null) markUnsynced(savedPath);   // 只记一笔待写回，不影响圆点
+      if (node !== null) { node.dirty = false; paintSidebarDot(node); }
     }
     console.log("[文件] 已写入 " + S.currentFileName + "（" + text.length + " 字节，开流 " + Math.round(t1 - t0) +
       " ms，写入 " + Math.round(t2 - t1) + " ms），收尾在后台进行");

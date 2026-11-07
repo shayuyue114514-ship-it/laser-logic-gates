@@ -220,8 +220,9 @@ function setNodeSaving(node, saving) {
 // 主循环每帧都调它，但只在状态真的翻转时才动 DOM，所以平时的代价只是一次布尔比较
 function syncSidebarDirty() {
   if (S.openFileNode === null) return;             // 当前文件不是从列表打开的，没有哪一行可标
-  // 圆点说的是「还没写回文件夹」：内存里还没存进工作区，或存了但还没刷新到文件夹，都算亮
-  const want = S.docDirty === true || isWorkspaceUnsynced(S.openFileNode.path);
+  // 圆点只表示「这份内容还没保存」：保存进工作区就算存好了，与有没有写回外部文件夹无关
+  // 以前把「待写回文件夹」也算进来，导致按下保存后圆点又亮回去，看起来像没存上
+  const want = S.docDirty === true;
   if (S.openFileNode.dirty === want) return;   // 状态没变就不动，不必每帧去翻一遍行元素
   S.openFileNode.dirty = want;
   paintSidebarDot(S.openFileNode);
