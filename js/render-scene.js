@@ -208,7 +208,7 @@ function drawLaser(vp) {
     const N = CONFIG.laserGlowLayers;
     for (let k = 0; k < N; k++) {
       const t = k / N;                  // 0 贴着光芯，越接近 1 越靠外
-      const fade = (1 - t) * (1 - t);   // 二次衰减：近处降得慢、远处迅速消失，观感更柔
+      const fade = 1 - t;               // 线性衰减：内层不再一家独大，光晕从里到外过渡平缓，没有硬棱
       gc.lineWidth = w * (1 + (CONFIG.laserGlowSpread - 1) * t);
       gc.globalAlpha = CONFIG.laserGlowAlpha * fade;
       gc.stroke(path);                  // 每层复用同一条路径，不重建
