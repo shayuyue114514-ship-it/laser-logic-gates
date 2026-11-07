@@ -83,8 +83,8 @@
      这是本项目里唯一一处内联事件：只有挂在元素自己身上，才能在文件到手的那一刻就改过来
      脚本被禁时 onload 不会跑，由下面那句 noscript 里的同款 link 兜住
      id 留给 js/boot.js 认：它靠 link.sheet 判断这份样式表到位没有，没到位就先不揭开遮挡层 -->
-<link id="mainStyle" rel="stylesheet" href="css/style.css?v=1.0.0.026" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="css/style.css?v=1.0.0.026"></noscript>
+<link id="mainStyle" rel="stylesheet" href="css/style.css?v=1.0.0.027" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="css/style.css?v=1.0.0.027"></noscript>
 </head>
 <body>
 
@@ -329,51 +329,51 @@
 <!-- 加载顺序不可随意调整：util.js 必须排在最前面，因为 config.js 在文件顶层就要用 hslToRgb 算配色端点，
        state.js 在文件顶层要调用缓动函数，两者都要用到工具函数；把工具函数提到最前，这两处才都不会落空
        下面按职责分成八组，组内顺序同样有约束；移动任何一行之前先看它所属组的说明 --------------------- -->
-<script src="js/util.js?v=1.0.0.026"></script>
-<script src="js/config.js?v=1.0.0.026"></script>
+<script src="js/util.js?v=1.0.0.027"></script>
+<script src="js/config.js?v=1.0.0.027"></script>
 <!-- 句柄记忆与存档文件的类型声明：编辑器与首页共用，两页写的是同一个库、同一个键，所以必须排在
      sidebar.js 与 files.js 之前——那两处都要用 SAVE_EXT 与那几个句柄函数 -->
-<script src="js/handle-store.js?v=1.0.0.026"></script>
+<script src="js/handle-store.js?v=1.0.0.027"></script>
 <!-- 工作区存储层：必须在 sidebar.js 之前加载，侧栏启动时要靠它打开 OPFS 工作区 -->
-<script src="js/workspace.js?v=1.0.0.026"></script>
+<script src="js/workspace.js?v=1.0.0.027"></script>
 <!-- 数据与绘图基础：元件类型表、全局状态容器、图标底图与三块渲染入口 -->
-<script src="js/element-types.js?v=1.0.0.026"></script>
-<script src="js/state.js?v=1.0.0.026"></script>
-<script src="js/icons.js?v=1.0.0.026"></script>
-<script src="js/render-scene.js?v=1.0.0.026"></script>
-<script src="js/render-panel.js?v=1.0.0.026"></script>
-<script src="js/scene.js?v=1.0.0.026"></script>
+<script src="js/element-types.js?v=1.0.0.027"></script>
+<script src="js/state.js?v=1.0.0.027"></script>
+<script src="js/icons.js?v=1.0.0.027"></script>
+<script src="js/render-scene.js?v=1.0.0.027"></script>
+<script src="js/render-panel.js?v=1.0.0.027"></script>
+<script src="js/scene.js?v=1.0.0.027"></script>
 <!-- 界面：教程正文、面板与各弹层、侧栏与右键菜单；都建立在上一组的渲染入口之上 -->
-<script src="js/tutorial-content.js?v=1.0.0.026"></script>
-<script src="js/ui.js?v=1.0.0.026"></script>
-<script src="js/sidebar.js?v=1.0.0.026"></script>
-<script src="js/sidebar-icons.js?v=1.0.0.026"></script>
-<script src="js/sidebar-menu.js?v=1.0.0.026"></script>
-<script src="js/sidebar-rename.js?v=1.0.0.026"></script>
-<script src="js/files.js?v=1.0.0.026"></script>
+<script src="js/tutorial-content.js?v=1.0.0.027"></script>
+<script src="js/ui.js?v=1.0.0.027"></script>
+<script src="js/sidebar.js?v=1.0.0.027"></script>
+<script src="js/sidebar-icons.js?v=1.0.0.027"></script>
+<script src="js/sidebar-menu.js?v=1.0.0.027"></script>
+<script src="js/sidebar-rename.js?v=1.0.0.027"></script>
+<script src="js/files.js?v=1.0.0.027"></script>
 <!-- 文本编辑器：双击 .txt / .md 时打开，保存走 files.js 里的权限确认 -->
-<script src="js/text-editor.js?v=1.0.0.026"></script>
+<script src="js/text-editor.js?v=1.0.0.027"></script>
 <!-- 设置、选项槽与元件：从放置、编辑到电路结算的一条链，彼此按调用关系排列 -->
-<script src="js/settings.js?v=1.0.0.026"></script>
-<script src="js/slots.js?v=1.0.0.026"></script>
-<script src="js/elements.js?v=1.0.0.026"></script>
-<script src="js/history.js?v=1.0.0.026"></script>
-<script src="js/circuit.js?v=1.0.0.026"></script>
-<script src="js/labels.js?v=1.0.0.026"></script>
-<script src="js/texts.js?v=1.0.0.026"></script>
-<script src="js/selection.js?v=1.0.0.026"></script>
-<script src="js/stack.js?v=1.0.0.026"></script>
-<script src="js/search.js?v=1.0.0.026"></script>
-<script src="js/ghost.js?v=1.0.0.026"></script>
-<script src="js/debug.js?v=1.0.0.026"></script>
-<script src="js/camera.js?v=1.0.0.026"></script>
-<script src="js/input.js?v=1.0.0.026"></script>
+<script src="js/settings.js?v=1.0.0.027"></script>
+<script src="js/slots.js?v=1.0.0.027"></script>
+<script src="js/elements.js?v=1.0.0.027"></script>
+<script src="js/history.js?v=1.0.0.027"></script>
+<script src="js/circuit.js?v=1.0.0.027"></script>
+<script src="js/labels.js?v=1.0.0.027"></script>
+<script src="js/texts.js?v=1.0.0.027"></script>
+<script src="js/selection.js?v=1.0.0.027"></script>
+<script src="js/stack.js?v=1.0.0.027"></script>
+<script src="js/search.js?v=1.0.0.027"></script>
+<script src="js/ghost.js?v=1.0.0.027"></script>
+<script src="js/debug.js?v=1.0.0.027"></script>
+<script src="js/camera.js?v=1.0.0.027"></script>
+<script src="js/input.js?v=1.0.0.027"></script>
 <!-- 启动收尾：离线登记独立，加载界面与字体要排在 main.js 之前 -->
-<script src="js/offline.js?v=1.0.0.026"></script>
+<script src="js/offline.js?v=1.0.0.027"></script>
 <!-- 加载界面与字体加载：两个都要排在 main.js 之前，main.js 起步时第一个要用、紧接着第二个也要用
      boot.js 管遮挡层何时收掉，fonts.js 把自带的 MiSans 点名取回来 ------------------------------- -->
-<script src="js/boot.js?v=1.0.0.026"></script>
-<script src="js/fonts.js?v=1.0.0.026"></script>
-<script src="js/main.js?v=1.0.0.026"></script>
+<script src="js/boot.js?v=1.0.0.027"></script>
+<script src="js/fonts.js?v=1.0.0.027"></script>
+<script src="js/main.js?v=1.0.0.027"></script>
 </body>
 </html>

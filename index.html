@@ -83,8 +83,8 @@
      这是本项目里唯一一处内联事件：只有挂在元素自己身上，才能在文件到手的那一刻就改过来
      脚本被禁时 onload 不会跑，由下面那句 noscript 里的同款 link 兜住
      id 留给 js/boot.js 认：它靠 link.sheet 判断这份样式表到位没有，没到位就先不揭开遮挡层 -->
-<link id="mainStyle" rel="stylesheet" href="css/style.css?v=1.0.0.026" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="css/style.css?v=1.0.0.026"></noscript>
+<link id="mainStyle" rel="stylesheet" href="css/style.css?v=1.0.0.027" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="css/style.css?v=1.0.0.027"></noscript>
 </head>
 <body>
 
@@ -146,23 +146,23 @@
      icons.js 与 tutorial-content.js 也是两个页面共用的那两份，home.js 借它们画图标、填教程正文。
      state.js 是共享状态容器：首页的演示引擎与编辑器读写的是同一份状态，所以两页都引它；
      其余的编辑器脚本（files.js、input.js 等）首页一概不引：那些是编辑职责，封面用不到。 -->
-<script src="js/util.js?v=1.0.0.026"></script>
-<script src="js/config.js?v=1.0.0.026"></script>
+<script src="js/util.js?v=1.0.0.027"></script>
+<script src="js/config.js?v=1.0.0.027"></script>
 <!-- 数据与绘图基础：存档句柄库、元件类型表、共享状态、电路结算、图标与教程正文 -->
-<script src="js/handle-store.js?v=1.0.0.026"></script>
-<script src="js/element-types.js?v=1.0.0.026"></script>
-<script src="js/state.js?v=1.0.0.026"></script>
-<script src="js/circuit.js?v=1.0.0.026"></script>
-<script src="js/icons.js?v=1.0.0.026"></script>
-<script src="js/tutorial-content.js?v=1.0.0.026"></script>
+<script src="js/handle-store.js?v=1.0.0.027"></script>
+<script src="js/element-types.js?v=1.0.0.027"></script>
+<script src="js/state.js?v=1.0.0.027"></script>
+<script src="js/circuit.js?v=1.0.0.027"></script>
+<script src="js/icons.js?v=1.0.0.027"></script>
+<script src="js/tutorial-content.js?v=1.0.0.027"></script>
 <!-- 版本日志正文：首页「日志」弹窗按 CHANGELOG 逐条排，必须排在 home.js 之前 -->
-<script src="js/changelog.js?v=1.0.0.026"></script>
+<script src="js/changelog.js?v=1.0.0.027"></script>
 <!-- 离线缓存登记：页面打开时静默把整站存进本地，之后断网也能直接打开，不依赖任何其它脚本 -->
-<script src="js/offline.js?v=1.0.0.026"></script>
+<script src="js/offline.js?v=1.0.0.027"></script>
 <!-- 加载界面与字体加载：两个都要排在 home.js 之前，home.js 起步时第一个要用、紧接着第二个也要用
      boot.js 管遮挡层何时收掉，fonts.js 把自带的 MiSans 点名取回来；两份都不碰编辑器状态，两页共用 -->
-<script src="js/boot.js?v=1.0.0.026"></script>
-<script src="js/fonts.js?v=1.0.0.026"></script>
-<script src="js/home.js?v=1.0.0.026"></script>
+<script src="js/boot.js?v=1.0.0.027"></script>
+<script src="js/fonts.js?v=1.0.0.027"></script>
+<script src="js/home.js?v=1.0.0.027"></script>
 </body>
 </html>

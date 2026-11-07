@@ -203,23 +203,24 @@ async function copyFolderIntoWorkspace(root, srcDir, prefix, written) {
 }
 
 // 把工作区里的一批受管文件写进目标文件夹，保持已有的层级；任何一次写入失败都直接抛出，由调用方中止
-// 收尾（stream.close）不在这一步等：浏览器把新内容换到原文件上时，对未知后缀要做安全核验，可能要好几秒
-// 界面陪着等就成了「点了写回，半天看不到成功」。内容交给浏览器就算写完，收尾放后台，失败再提示一次
+// 每份文件各走各的：读内容、开流、写入、收尾全程并行，不排队等别人
+// 收尾（stream.close）也不必等：浏览器把新内容换到原文件上时对未知后缀要做安全核验，可能要好几秒，
+// 界面陪着等就成了「点了写回，半天看不到成功」；内容交给浏览器就算写完，收尾放后台，失败再提示一次
 async function writeFilesToFolder(dstDir, files) {
   const closers = [];
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
+  const tasks = files.map(async function (f) {
     const text = await (await f.handle.getFile()).text();
     const dir = await ensureDirByPath(dstDir, dirPathOf(f.path), true);
     const fh = await dir.getFileHandle(f.name, { create: true });
     const stream = await fh.createWritable();
     await stream.write(text);
-    // 开流与写入都成功才往下走；收尾统一挂到后台，不阻塞下一份文件，也不阻塞提示
+    // 开流与写入都成功才往下走；收尾挂到后台，不阻塞别的文件，也不阻塞提示
     closers.push(stream.close().catch(function (err) {
       console.log("[工作区] " + f.path + " 收尾失败：", err);
       showToast("「" + f.name + "」没有写完，请再写回一次");
     }));
-  }
+  });
+  await Promise.all(tasks);
   Promise.all(closers).catch(function () { /* 单份失败已在上面各自提示过 */ });
 }
 
