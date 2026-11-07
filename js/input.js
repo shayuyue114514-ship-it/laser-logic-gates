@@ -425,12 +425,15 @@ function setupInput() {
     // 同样是全局快捷键，与指针在不在画布上无关；手上有悬空时由撤销自己先把它取消掉
     if (e.code === "KeyZ" && cmdKeyHeld(e)) {
       e.preventDefault();
+      // 按住不放会一路重复触发，一次长按就退回十几步，看起来像画面突然跳走；只管第一次按下
+      if (e.repeat) return;
       if (e.shiftKey) redo(); else undo();
       return;
     }
     // Ctrl+Y：Windows 上另一套常用的重做键位，与 Ctrl+Shift+Z 等价，一并认下
     if (e.code === "KeyY" && e.ctrlKey) {
       e.preventDefault();
+      if (e.repeat) return;   // 同上：长按不连续重做
       redo();
       return;
     }
