@@ -223,7 +223,14 @@ function syncSidebarDirty() {
   // 圆点只表示「这份内容还没保存」：保存进工作区就算存好了，与有没有写回外部文件夹无关
   // 以前把「待写回文件夹」也算进来，导致按下保存后圆点又亮回去，看起来像没存上
   const want = S.docDirty === true;
-  if (S.openFileNode.dirty === want) return;   // 状态没变就不动，不必每帧去翻一遍行元素
+  // 直接以行元素此刻的类名为准来对齐，而不是先看节点上的缓存字段：
+  // 只要缓存字段和 DOM 有一次对不上，旧写法就会以为「没变化」而一直不再刷新，圆点便再也灭不掉
+  const row = findSidebarRow(S.openFileNode);
+  const dot = row === null ? null : row.querySelector(".sb-dot");
+  if (dot !== null && dot.classList.contains("is-on") === want) {
+    S.openFileNode.dirty = want;   // 显示已经对了，只把字段补正，不动 DOM
+    return;
+  }
   S.openFileNode.dirty = want;
   paintSidebarDot(S.openFileNode);
 }

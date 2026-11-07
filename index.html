@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <!-- 标题显示在浏览器标签和搜索结果的大字上；简介显示在搜索结果标题下方那两行 -->
 <title>激光门 - 用光路搭出逻辑门</title>
 <meta name="description" content="使用激光门造就奇迹。用不同的元件做出电路，让激光沿网格逐格传播，把与门、或门、非门亲手搭出来，看光是怎么把它们算出来的。">
@@ -81,8 +83,8 @@
      这是本项目里唯一一处内联事件：只有挂在元素自己身上，才能在文件到手的那一刻就改过来
      脚本被禁时 onload 不会跑，由下面那句 noscript 里的同款 link 兜住
      id 留给 js/boot.js 认：它靠 link.sheet 判断这份样式表到位没有，没到位就先不揭开遮挡层 -->
-<link id="mainStyle" rel="stylesheet" href="css/style.css?v=1.0.0.022" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="css/style.css?v=1.0.0.022"></noscript>
+<link id="mainStyle" rel="stylesheet" href="css/style.css?v=1.0.0.023" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="css/style.css?v=1.0.0.023"></noscript>
 </head>
 <body>
 
@@ -144,23 +146,23 @@
      icons.js 与 tutorial-content.js 也是两个页面共用的那两份，home.js 借它们画图标、填教程正文。
      state.js 是共享状态容器：首页的演示引擎与编辑器读写的是同一份状态，所以两页都引它；
      其余的编辑器脚本（files.js、input.js 等）首页一概不引：那些是编辑职责，封面用不到。 -->
-<script src="js/util.js?v=1.0.0.022"></script>
-<script src="js/config.js?v=1.0.0.022"></script>
+<script src="js/util.js?v=1.0.0.023"></script>
+<script src="js/config.js?v=1.0.0.023"></script>
 <!-- 数据与绘图基础：存档句柄库、元件类型表、共享状态、电路结算、图标与教程正文 -->
-<script src="js/handle-store.js?v=1.0.0.022"></script>
-<script src="js/element-types.js?v=1.0.0.022"></script>
-<script src="js/state.js?v=1.0.0.022"></script>
-<script src="js/circuit.js?v=1.0.0.022"></script>
-<script src="js/icons.js?v=1.0.0.022"></script>
-<script src="js/tutorial-content.js?v=1.0.0.022"></script>
+<script src="js/handle-store.js?v=1.0.0.023"></script>
+<script src="js/element-types.js?v=1.0.0.023"></script>
+<script src="js/state.js?v=1.0.0.023"></script>
+<script src="js/circuit.js?v=1.0.0.023"></script>
+<script src="js/icons.js?v=1.0.0.023"></script>
+<script src="js/tutorial-content.js?v=1.0.0.023"></script>
 <!-- 版本日志正文：首页「日志」弹窗按 CHANGELOG 逐条排，必须排在 home.js 之前 -->
-<script src="js/changelog.js?v=1.0.0.022"></script>
+<script src="js/changelog.js?v=1.0.0.023"></script>
 <!-- 离线缓存登记：页面打开时静默把整站存进本地，之后断网也能直接打开，不依赖任何其它脚本 -->
-<script src="js/offline.js?v=1.0.0.022"></script>
+<script src="js/offline.js?v=1.0.0.023"></script>
 <!-- 加载界面与字体加载：两个都要排在 home.js 之前，home.js 起步时第一个要用、紧接着第二个也要用
      boot.js 管遮挡层何时收掉，fonts.js 把自带的 MiSans 点名取回来；两份都不碰编辑器状态，两页共用 -->
-<script src="js/boot.js?v=1.0.0.022"></script>
-<script src="js/fonts.js?v=1.0.0.022"></script>
-<script src="js/home.js?v=1.0.0.022"></script>
+<script src="js/boot.js?v=1.0.0.023"></script>
+<script src="js/fonts.js?v=1.0.0.023"></script>
+<script src="js/home.js?v=1.0.0.023"></script>
 </body>
 </html>
