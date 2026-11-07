@@ -49,15 +49,21 @@ function getGridPattern(cellCss) {
   const dpr = effectiveDpr();
   // 瓷砖按物理像素开位图，边长取整；缩放连续变化时这个整数会跟着跳，所以它同时充当缓存指纹
   const t = Math.max(1, Math.round(cellCss * dpr));
-  // 线宽 = 格宽 × gridLineRatio + gridLineBase，上限 1 CSS px（格宽超过约 26 px 时线不再变粗，与原观感一致）
+  // 线宽 = 格宽 × gridLineRatio + gridLineBase，超过上限就按上限走
   // 一根固定 1 px 的线，格子越小它占的比例越大：格宽 40 px 时占 2.5%，格宽 4 px 时就占到 25%，
   // 于是越缩网格越密、整片越压越重，元件与光束反而被盖住；让线跟着格宽一起缩，这个比例才压得住
   // 但不能纯按比例缩：比例项到格宽 1 px 时只剩 0.03 px，0.25 px 以下就看不见了，所以加一个固定加数兜底，
   // 线永远细不到 0.22 CSS px 以下，缩到底也仍是看得见的一根线
+  // 反过来，放大到格子很大时 1 px 的线相对格宽又太细，整片发淡；所以上限随格宽从 1 px 平滑抬到 1+gridLineBoost px，
+  // 用 smoothstep 过渡，两端都不突变，缩放手感是连续的
   // 这里没有「小到某个尺寸就不画」的分支：线细到不足一个像素时，canvas 会把描边按覆盖面积摊成淡色，
   // 那是它真的有这么细，不是被抹掉或单独调淡了
   // 注意 lineWidth 为 0 在 canvas 里是「发丝线」（整整一个物理像素、满不透明），比 1 还醒目，所以下面必须挡住
-  const lw = Math.min(dpr, (cellCss * CONFIG.gridLineRatio + CONFIG.gridLineBase) * dpr);
+  const boostSpan = CONFIG.gridLineBoostTo - CONFIG.gridLineBoostFrom;
+  const boostT = Math.max(0, Math.min(1, (cellCss - CONFIG.gridLineBoostFrom) / boostSpan));  // 0 = 尚未放大，1 = 已足够大
+  const boostK = boostT * boostT * (3 - 2 * boostT);   // smoothstep：起步与收尾都放缓，放大时线宽不会突然跳一档
+  const capCss = 1 + CONFIG.gridLineBoost * boostK;    // 这一格宽下的线宽上限（CSS px）
+  const lw = Math.min(capCss, cellCss * CONFIG.gridLineRatio + CONFIG.gridLineBase) * dpr;
   const key = t + "|" + dpr + "|" + lw.toFixed(4);   // 线宽也是这幅图的一部分，一并充当缓存指纹
   if (S.gridTileKey === key && S.gridPattern !== null) return S.gridPattern;
   if (S.gridTile === null) {
