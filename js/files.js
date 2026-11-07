@@ -247,6 +247,7 @@ async function writeCurrentFile() {
         markUnsynced(savedPath);
         if (node !== null) { node.dirty = true; paintSidebarDot(node); }
       } else if (node !== null) {
+        clearUnsynced(savedPath);   // 顺手把以前残留的待同步记录清掉，否则圆点会被旧记录一直点亮
         node.dirty = false;
         paintSidebarDot(node);
       }

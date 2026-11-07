@@ -50,7 +50,9 @@ async function loadWorkspaceState() {
   const deletes = await getStoredHandle(PENDING_DELETES_KEY);
   boundFolder = folder || null;
   baselinePaths = Array.isArray(baseline) ? baseline : [];
-  unsyncedPaths = Array.isArray(unsynced) ? unsynced : [];
+  // 没绑定文件夹时「写回文件夹」这件事根本不存在，之前留下的待同步记录都是空话
+  // 不清掉的话，旧记录会让列表圆点在保存后依旧亮着，看起来像没存上
+  unsyncedPaths = boundFolder !== null && Array.isArray(unsynced) ? unsynced : [];
   pendingDeletes = Array.isArray(deletes) ? deletes : [];
 }
 
