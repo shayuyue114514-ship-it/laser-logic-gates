@@ -58,7 +58,8 @@ SW_TEMPLATE = os.path.join(ROOT, "tools", "sw-template.js")
 SW_PLACEHOLDER = "__APP_VERSION__"
 
 # 页面里一条脚本标签的完整形态：本项目里所有脚本都是外链、都不带其它属性，所以匹配得很死
-SCRIPT_TAG_RE = re.compile(r'<script\s+src="(js/[^"]+\.js)"\s*></script>')
+# 引用后面可以带一个版本号查询串（?v=1.0.0.xxx），那是给浏览器换缓存用的，不属于文件路径
+SCRIPT_TAG_RE = re.compile(r'<script\s+src="(js/[^"?]+\.js)(?:\?[^"]*)?"\s*></script>')
 
 
 def node_env():
@@ -220,7 +221,9 @@ def check_assets():
         for ref in refs:
             if ref.startswith(("http://", "https://", "#", "data:")):
                 continue
-            if not os.path.isfile(os.path.join(DIST, ref)):
+            # 版本号查询串只影响缓存，不是文件名的一部分，核对文件时先摘掉
+            local_ref = ref.split("?", 1)[0]
+            if not os.path.isfile(os.path.join(DIST, local_ref)):
                 problems.append(page + " 引用了 " + ref + "，dist 里没有")
     css_path = os.path.join(DIST, "css", "style.css")
     for ref in re.findall(r'url\("([^"]+)"\)', read_text(css_path)):
