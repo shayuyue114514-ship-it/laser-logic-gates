@@ -119,6 +119,7 @@ html, body {
   position: fixed;
   left: 0;
   top: 0;
+  z-index: 30;                /* 压在最上层：提示是全局的，TXT/MD 编辑器与空白层（3）不能把它盖住 */
   box-sizing: border-box;
   max-width: 60vw;
   padding: 8px 18px;
@@ -356,6 +357,34 @@ html, body {
   border-bottom: 1px solid rgba(13, 71, 161, 0.16);
 }
 .sb-header:hover { background: transparent; }
+/* 标题行右端的一对小按钮：读入、写出，只管当前绑定的那个文件夹，所以贴着它的名字放 */
+.sb-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;   /* 把这一组推到标题行最右，名字仍靠左 */
+}
+/* 小号按钮：比标题轻一档的字重，边框与顶部条同色，按下只换底不缩放，免得在标题行里跳动 */
+.ws-mini {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(13, 71, 161, 0.28);
+  border-radius: 5px;
+  color: #1F2933;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.16s ease-out;
+}
+.ws-mini:hover { background: #D8F3FF; }
+.ws-mini:active { background: #ADDCF5; }
+.ws-mini .ws-icon { width: 13px; height: 13px; }
 /* 一条条目：图标与文字横向排开，行高定死，整行都是可点区域 */
 .sb-row {
   display: flex;
@@ -1193,10 +1222,76 @@ html, body {
   line-height: 1.7;
   tab-size: 4;
 }
+/* 预览层默认收起；进入预览时藏起输入框、露出这一层，两者占同一块位置，切换时页面不跳 */
+#textEditor .te-preview { display: none; }
+#textEditor.previewing textarea { display: none; }
+#textEditor.previewing .te-preview { display: block; }
+/* Markdown 阅读排版：正文字号按「显示给人看」来定，标题成倍放大，远看也清楚 */
+#textEditor .te-preview {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 32px 48px 72px;
+  background: #FFFFFF;
+  color: #1F2933;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 20px;
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+#textEditor .te-preview > *:first-child { margin-top: 0; }
+#textEditor .te-preview p { margin: 0.75em 0; }
+#textEditor .te-preview h1,
+#textEditor .te-preview h2,
+#textEditor .te-preview h3,
+#textEditor .te-preview h4,
+#textEditor .te-preview h5,
+#textEditor .te-preview h6 {
+  margin: 1.05em 0 0.45em;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #16202A;
+}
+#textEditor .te-preview h1 { font-size: 3.4em; letter-spacing: -0.01em; }  /* 20px 正文下约 68px，用来远距离展示 */
+#textEditor .te-preview h2 { font-size: 2.5em; }   /* 约 50px */
+#textEditor .te-preview h3 { font-size: 1.9em; }   /* 约 38px */
+#textEditor .te-preview h4 { font-size: 1.5em; }   /* 约 30px */
+#textEditor .te-preview h5 { font-size: 1.25em; }
+#textEditor .te-preview h6 { font-size: 1.1em; color: #5B6B7B; }
+#textEditor .te-preview ul,
+#textEditor .te-preview ol { margin: 0.6em 0; padding-left: 1.8em; }
+#textEditor .te-preview li { margin: 0.28em 0; }
+#textEditor .te-preview blockquote {
+  margin: 0.9em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 4px solid #C9D8E6;
+  color: #5B6B7B;
+}
+#textEditor .te-preview hr { margin: 1.4em 0; border: none; border-top: 1px solid #DCE6EF; }
+#textEditor .te-preview code {
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+  background: #F2F6FA;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+#textEditor .te-preview pre {
+  margin: 0.9em 0;
+  padding: 14px 18px;
+  border: 1px solid #E3EBF3;
+  border-radius: 10px;
+  background: #F7F9FB;
+  overflow-x: auto;
+}
+#textEditor .te-preview pre code { padding: 0; background: none; font-size: 0.82em; line-height: 1.6; }
+#textEditor .te-preview a { color: #2F7FD1; text-decoration: underline; }
+#textEditor .te-preview del { color: #7B8A99; }
 
 /* ========== 工作区按钮条 ========== */
 
-/* 顶部四个按钮：两行两列，图标在上、短名称在下；与列表之间有一道淡线分开 */
+/* 顶部两个按钮：一行两列，图标在上、短名称在下；与列表之间有一道淡线分开
+   对当前文件夹的「读入 / 写出」不在这里，而是挂在列表标题行的右端，见 .sb-header-actions */
 #workspaceBar {
   flex: none;
   display: grid;

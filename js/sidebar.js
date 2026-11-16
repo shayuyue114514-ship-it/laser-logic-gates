@@ -120,6 +120,7 @@ function buildSidebarTree() {
   headerName.className = "sb-label";
   headerName.textContent = currentTree.name;   // 名称是数据，用 textContent 写入，不做任何转义或拼接
   header.appendChild(headerName);
+  appendWorkspaceHeaderButtons(header);   // 「读入 / 写出」跟在标题右侧：它们只管当前绑定的那个文件夹
   S.sidebarTreeDom.appendChild(header);
   renderSidebarNodes(currentTree.children, 0);
   // 正在新建时把输入行补回去：整棵重画会把那一行连同 DOM 一起清掉，重画后要重新摆上

@@ -251,10 +251,14 @@ async function reloadWorkspaceTree() {
   }
 }
 
-/* ========== 四个按钮 ========== */
+/* ========== 四个按钮：两组，各管一个文件夹 ========== */
 
-// 按钮一：从一个任意文件夹导入（可以是绑定的，也可以是别的），只拷进工作区，不改绑定
-// 同名覆盖，工作区里多出来的文件原样保留；导入进来的路径都记为待写回
+// 组一（顶部条）：对「别的文件夹」——导入、绑定。一个只拷进来，一个连绑定一起换掉
+// 组二（列表标题右侧）：对「当前文件夹」——读入、写出。只在已绑定的那个文件夹与工作区之间来回
+// 这样分组放在两处：名字不必再靠动词去猜方向，按钮挨着哪个对象就管哪个对象
+
+// 导入：从一个任意文件夹拷进工作区（可以是绑定的，也可以是别的），不改绑定
+// 同名覆盖，工作区里多出来的文件原样保留；导入进来的路径都记为待写出
 async function onImportFolder() {
   if (!("showDirectoryPicker" in window)) { showToast("当前浏览器不支持选择文件夹"); return; }
   let handle;
@@ -278,33 +282,50 @@ async function onImportFolder() {
   }
 }
 
-// 按钮二：把当前绑定的文件夹整份拉进工作区，同名覆盖，不删工作区里多出来的文件
-// 拉完之后两边这一部分就一致了，待删记号与未同步记号一并清掉
-async function onRefreshFromFolder() {
-  if (boundFolder === null) { showToast("还没有绑定文件夹，请先「另存为」选一个"); return; }
+// 读入：用当前绑定的文件夹整份覆盖工作区，同名覆盖，不删工作区里多出来的文件
+// 覆盖会盖掉工作区里还没写出的改动，所以先算出这批冲突并让用户确认，确认之后才动磁盘
+// 读入之后两边的这一部分就一致了，待删记号与未同步记号一并清掉
+async function onReadIntoWorkspace() {
+  if (boundFolder === null) { showToast("还没有绑定文件夹，请先「绑定」一个"); return; }
   if (!(await ensureWritePermission(boundFolder))) { showToast("没有文件夹的访问权限"); return; }
   const root = await getWorkspaceRoot();
   if (root === null) { showToast("当前浏览器不支持内部工作区"); return; }
+  let folderFiles;
+  try {
+    // 先收一份文件夹清单：既要据此找冲突，也要知道覆盖之后两边对齐的是哪一批
+    folderFiles = await collectManagedFiles(boundFolder, "", []);
+  } catch (err) {
+    console.log("[工作区] 读取文件夹失败：", err);
+    showToast("读取文件夹失败，请重试");
+    return;
+  }
+  // 冲突＝两边都有、且工作区这一份改过还没写出：覆盖之后改动就没了，先问一句
+  const folderPaths = folderFiles.map(function (f) { return f.path; });
+  const lost = unsyncedPaths.filter(function (p) { return folderPaths.indexOf(p) >= 0; });
+  if (lost.length > 0) {
+    const go = await askOverwriteDialog(lost);
+    if (!go) { console.log("[工作区] 读入已取消，工作区原样不动"); return; }
+  }
   try {
     const written = await copyFolderIntoWorkspace(root, boundFolder, "", []);
     for (let i = 0; i < written.length; i++) clearUnsynced(written[i]);
     baselinePaths = written.slice();   // 文件夹里受管文件的全集，就是这一次拷进来的这一批
     pendingDeletes = [];                // 已按文件夹对齐，不存在待删项
     await persistBindings();
-  persistMarks();
+    persistMarks();
     await reloadWorkspaceTree();
-    console.log("[工作区] 已从 " + boundFolder.name + " 刷新 " + written.length + " 个文件");
-    showToast("已刷新 " + written.length + " 个文件到工作区");
+    console.log("[工作区] 已用 " + boundFolder.name + " 覆盖工作区，共 " + written.length + " 个文件");
+    showToast("已用「" + boundFolder.name + "」覆盖工作区，共 " + written.length + " 个文件");
   } catch (err) {
-    console.log("[工作区] 刷新到工作区失败：", err);
-    showToast("刷新失败，请重试");
+    console.log("[工作区] 读入失败：", err);
+    showToast("读入失败，请重试");
   }
 }
 
-// 按钮三：把工作区整份写回绑定的文件夹，按需删除对面那一批
+// 写出：把工作区整份写入当前绑定的文件夹，按需删除对面那一批
 // 删除前先弹窗；写入失败时一个都不删，避免删完才发现新内容没写进去
-async function onSyncToFolder() {
-  if (boundFolder === null) { showToast("还没有绑定文件夹，请先「另存为」选一个"); return; }
+async function onWriteOutToFolder() {
+  if (boundFolder === null) { showToast("还没有绑定文件夹，请先「绑定」一个"); return; }
   if (!(await ensureWritePermission(boundFolder))) { showToast("没有文件夹的写入权限"); return; }
   const root = await getWorkspaceRoot();
   if (root === null) { showToast("当前浏览器不支持内部工作区"); return; }
@@ -349,12 +370,13 @@ async function onSyncToFolder() {
   await persistBindings();
   persistMarks();
   await reloadWorkspaceTree();
-  console.log("[工作区] 已刷新到 " + boundFolder.name + "：写入 " + wsFiles.length + " 个，删除 " + toDelete.length + " 个");
-  showToast("已刷新到文件夹「" + boundFolder.name + "」");
+  console.log("[工作区] 已写出到 " + boundFolder.name + "：写入 " + wsFiles.length + " 个，删除 " + toDelete.length + " 个");
+  showToast("已把 " + wsFiles.length + " 个文件写入「" + boundFolder.name + "」" +
+    (toDelete.length > 0 ? "，删除 " + toDelete.length + " 个" : ""));
 }
 
-// 按钮四：把整个工作区写到一个新选的文件夹，并把这个文件夹设成新的绑定
-async function onSaveWorkspaceAs() {
+// 绑定：把整个工作区写到一个新选的文件夹，并把这个文件夹设为当前文件夹
+async function onBindFolder() {
   if (!("showDirectoryPicker" in window)) { showToast("当前浏览器不支持选择文件夹"); return; }
   let handle;
   try {
@@ -377,7 +399,7 @@ async function onSaveWorkspaceAs() {
   try {
     await writeFilesToFolder(handle, files);
   } catch (err) {
-    console.log("[工作区] 另存为失败：", err);
+    console.log("[工作区] 绑定文件夹失败：", err);
     showToast("写入文件夹失败，请重试");
     return;
   }
@@ -388,8 +410,8 @@ async function onSaveWorkspaceAs() {
   await persistBindings();
   persistMarks();
   await reloadWorkspaceTree();
-  console.log("[工作区] 已另存为到 " + handle.name + "，共 " + files.length + " 个文件");
-  showToast("已绑定文件夹「" + handle.name + "」");
+  console.log("[工作区] 已绑定文件夹 " + handle.name + "，共 " + files.length + " 个文件");
+  showToast("已绑定文件夹「" + handle.name + "」，共 " + files.length + " 个文件");
 }
 
 /* ========== 同步确认弹窗 ========== */
@@ -491,6 +513,38 @@ function askSyncDialog(deletes, keeps) {
   });
 }
 
+// 读入前的确认：paths 是会被文件夹里那份盖掉、且还没写出的文件；返回 true 表示继续
+// 与删除弹窗共用同一层骨架，只换标题、说明与按钮：这一次是覆盖，所以只给「取消」与「仍然读入」
+function askOverwriteDialog(paths) {
+  return new Promise(function (resolve) {
+    if (syncResolve !== null) return;   // 已经有一个在等，不叠第二个
+    syncResolve = resolve;
+    const card = syncDialogDom.querySelector(".sync-card");
+    const title = card.querySelector(".sync-title");
+    const sub = card.querySelector(".sync-sub");
+    const list = card.querySelector(".sync-list");
+    const actions = card.querySelector(".sync-actions");
+    list.textContent = "";
+    actions.textContent = "";
+    title.textContent = "将覆盖 " + paths.length + " 个还没写出的文件";
+    sub.textContent = "文件夹里的版本会盖掉工作区里这些文件的改动，盖掉之后无法找回。";
+    for (let i = 0; i < paths.length; i++) list.appendChild(makeSyncRow(paths[i], "keep"));
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "sync-btn is-cancel";
+    cancelBtn.textContent = "取消";
+    cancelBtn.addEventListener("click", function () { closeSyncDialog(false); });
+    actions.appendChild(cancelBtn);
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "sync-btn is-delete-all";   // 与「全部删除」同一档强调：都会让改动不可找回
+    okBtn.textContent = "仍然读入";
+    okBtn.addEventListener("click", function () { closeSyncDialog(true); });
+    actions.appendChild(okBtn);
+    syncDialogDom.style.display = "flex";
+  });
+}
+
 // 收掉弹窗并把结论交回等待的那一段
 function closeSyncDialog(action) {
   if (syncResolve === null) return;
@@ -502,7 +556,7 @@ function closeSyncDialog(action) {
 
 /* ========== 按钮条 ========== */
 
-// 一个按钮的图标：四条路径分别对应导入、拉取、写回、另存为
+// 一个按钮的图标：四条路径分别对应导入、读入、写出、绑定
 function workspaceButtonIcon(kind) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
@@ -521,29 +575,47 @@ function workspaceButtonIcon(kind) {
   return svg;
 }
 
-// 建四个按钮：图标在上、短名称在下，点击各走一条流程
+let wsHeaderActions = null;   // HTMLElement|null：标题行右端那一格小容器，装着读入、写出，建一次后跟着列表重画走
+
+// 造一个按钮：图标 + 短名称；mini 为真时是标题行里那一档小号样式
+// 点击、防抢焦点两处行为与顶部条完全一致，所以两处共用这一个造法
+function makeWorkspaceButton(item, mini) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = mini ? "ws-mini" : "ws-btn";
+  btn.title = item.title;
+  btn.appendChild(workspaceButtonIcon(item.kind));
+  const label = document.createElement("span");
+  label.textContent = item.label;
+  btn.appendChild(label);
+  btn.addEventListener("click", function () { item.run(); });
+  // 按下时不抢焦点：键盘快捷键绑在窗口上，按钮不该留着焦点框
+  btn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  return btn;
+}
+
+// 建两类按钮，放在两处：
+// 顶部条只放对「别的文件夹」的两个——导入、绑定，图标在上、短名称在下
+// 列表标题行右端放对「当前文件夹」的两个——读入、写出，做成小号，跟在工作区名后面
 function initWorkspaceBar() {
   const bar = document.getElementById("workspaceBar");
   if (bar === null) return;
-  const items = [
-    { kind: "import", label: "导入", title: "从文件夹导入", run: onImportFolder },
-    { kind: "pull", label: "拉取", title: "刷新到工作区", run: onRefreshFromFolder },
-    { kind: "push", label: "写回", title: "刷新到文件夹", run: onSyncToFolder },
-    { kind: "saveas", label: "另存为", title: "另存为并绑定", run: onSaveWorkspaceAs }
+  const topItems = [
+    { kind: "import", label: "导入", title: "从其它文件夹导入，不改变当前文件夹", run: onImportFolder },
+    { kind: "saveas", label: "绑定", title: "选一个文件夹，把工作区写进去并设为当前文件夹", run: onBindFolder }
   ];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "ws-btn";
-    btn.title = item.title;
-    btn.appendChild(workspaceButtonIcon(item.kind));
-    const label = document.createElement("span");
-    label.textContent = item.label;
-    btn.appendChild(label);
-    btn.addEventListener("click", function () { item.run(); });
-    // 按下时不抢焦点：键盘快捷键绑在窗口上，按钮不该留着焦点框
-    btn.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    bar.appendChild(btn);
-  }
+  for (let i = 0; i < topItems.length; i++) bar.appendChild(makeWorkspaceButton(topItems[i], false));
+  wsHeaderActions = document.createElement("div");
+  wsHeaderActions.className = "sb-header-actions";
+  const headerItems = [
+    { kind: "pull", label: "读入", title: "用当前文件夹覆盖工作区", run: onReadIntoWorkspace },
+    { kind: "push", label: "写出", title: "把工作区写入当前文件夹", run: onWriteOutToFolder }
+  ];
+  for (let i = 0; i < headerItems.length; i++) wsHeaderActions.appendChild(makeWorkspaceButton(headerItems[i], true));
+}
+
+// 把读入、写出接到列表标题行的右端：列表每次整棵重画都会造新的标题行，所以要重新挂一次
+// 挂的是同一个容器，里面的按钮与它们的事件监听不会重建，也不会越挂越多
+function appendWorkspaceHeaderButtons(header) {
+  if (wsHeaderActions !== null) header.appendChild(wsHeaderActions);
 }

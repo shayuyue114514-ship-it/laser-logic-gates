@@ -60,7 +60,7 @@ function init() {
   S.ctx = S.canvas.getContext("2d");
   resizeCanvas();
   initSidebarDom();  // 先把竖栏的宽度定下来：复位视图时要按「让出竖栏之后」的视口居中
-  initWorkspaceBar();  // 工作区顶部四个按钮：导入、拉取、写回、另存为
+  initWorkspaceBar();  // 工作区按钮：顶部「导入、绑定」，列表标题行「读入、写出」
   setupSidebarTree();  // 再把存档列表画出来并接上开合；列表读的是浏览器内部工作区
   resetView();
   initElementLayer();

@@ -73,6 +73,9 @@ function attachElement(el) {
   el.selected = false;
   el.deleting = false;  // 撤销删除时元件可能还在播消失动画，不清掉的话动画会接着放完、把它真的摘走
   el.deleteP = 0;
+  // 这个标记只会在消失动画走完时被置上，之后从不复位：撤销把元件挂回来时若不清掉，
+  // 它就成了「随时会被压实清走」的残渣，下一次任何删除动画结束都会把它一起抹掉
+  el.gone = false;
   el.selP = newEased(0);  // 选中缓动重新起算，否则会从上次留下的进度接着亮
   el.litP = newEased(0);  // 灯的亮起缓动同样重新起算，撤销回来的灯不会带着上次的亮态
   el.litIn = false;       // 照到没照到由下一微帧的结算重新判定
@@ -266,9 +269,31 @@ function cancelFloat() {
   return true;
 }
 
+// 手上有没有「本来不在电路里」的悬空元件：刚粘贴、刚导入的那批，对照表里查无此人
+// 撤销遇到它们不能直接抹掉：它们从头到尾没进过历史，抹掉之后既撤不回来，也重做不回来
+function hasUntrackedFloat() {
+  for (let i = 0; i < S.elements.length; i++) {
+    const el = S.elements[i];
+    if (el.selected && !el.deleting && !S.committedTable.has(el.id)) return true;
+  }
+  return false;
+}
+
+// 把整批悬空落定成一步：对照表里有的摆回它原本的样子，新来的记成「挂上来」
+// 拉框途中按下撤销也要照常记步，否则这一批照样进不了历史
+function landFloatAsStep() {
+  settleInteractions();
+  S.marqueeActive = false;
+  S.marqueePressing = false;
+  applySelection(function () { return false; }, false);
+}
+
 // 撤销：手上有悬空就先把它取消（这一步不进历史），否则往回退一步
+// 但悬空里混着刚粘贴/导入的新元件时，先落定成一步再退：画面结果同样是它们离开，
+// 区别在于这一次是真正记过的一步，重做能把它们原样找回来
 function undo() {
-  if (cancelFloat()) return;
+  if (hasUntrackedFloat()) landFloatAsStep();
+  else if (cancelFloat()) return;
   if (S.historyIndex < 0) return;
   settleInteractions();
   applyOps(S.historyStack[S.historyIndex], true);
@@ -278,7 +303,12 @@ function undo() {
 }
 
 // 重做：与撤销对称，手上有悬空同样先取消，再往前恢复一步
+// 悬空里混着刚粘贴/导入的新元件时，同样先落定成一步：宁可停在原地，也不把它们连同历史一起抹掉
 function redo() {
+  if (hasUntrackedFloat()) {
+    landFloatAsStep();
+    return;   // 刚落定的这一批就是最新状态，前面没有更往后的分支可走
+  }
   if (cancelFloat()) return;
   if (S.historyIndex + 1 >= S.historyStack.length) return;
   settleInteractions();
